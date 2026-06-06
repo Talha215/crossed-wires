@@ -237,6 +237,7 @@ function load() {
       if (!room.lastActivity) room.lastActivity = Date.now();
       // Migrate saves from before the turn timer existed.
       if (room.timerSecs === undefined) { room.timerSecs = 0; room.turnDeadline = null; }
+      room.hostAwolSince = null; // never migrate just because we rebooted
       // Migrate saves from before themes / paced reveal / voting existed.
       if (!room.theme) room.theme = 'classic';
       if (room.revealDone === undefined) {
@@ -437,6 +438,40 @@ function sweepStaleRooms() {
     save();
   }
 }
+
+// ---------------------------------------------------------------------------
+// Host migration — a room must never be bricked because the host's phone
+// died. If the host stays disconnected while others are present, the
+// longest-tenured connected player inherits the crown.
+// ---------------------------------------------------------------------------
+
+const HOST_AWOL_MS = 60 * 1000;
+
+function migrateHost(room, newHost) {
+  room.hostToken = newHost.token;
+  room.hostAwolSince = null;
+  save();
+  broadcast(room);
+  io.to(room.code).emit('error_msg', `👑 ${newHost.name} is now the host.`);
+}
+
+function checkHostMigration(room) {
+  const host = findPlayer(room, room.hostToken);
+  const fallback = room.players.find(p => p.connected && p.token !== room.hostToken);
+  if ((host && host.connected) || !fallback) {
+    room.hostAwolSince = null;
+    return;
+  }
+  if (!room.hostAwolSince) {
+    room.hostAwolSince = Date.now(); // start the clock; maybe they're refreshing
+  } else if (Date.now() - room.hostAwolSince > HOST_AWOL_MS) {
+    migrateHost(room, fallback);
+  }
+}
+
+setInterval(() => {
+  for (const room of rooms.values()) checkHostMigration(room);
+}, 20 * 1000);
 
 // ---------------------------------------------------------------------------
 // Turn timer — host opt-in. When the deadline passes, the turn auto-skips
@@ -981,10 +1016,16 @@ io.on('connection', socket => {
     if (!room) return;
     const idx = room.players.findIndex(p => p.token === socket.data.token);
     if (idx === -1) return;
+    const wasHost = room.players[idx].token === room.hostToken;
     if (room.status === 'lobby') room.players.splice(idx, 1);
     else room.players[idx].connected = false;
     socket.leave(room.code);
     socket.data.code = socket.data.token = undefined;
+    // An explicit departure hands the crown over immediately.
+    if (wasHost && room.players.length) {
+      const heir = room.players.find(p => p.connected) || room.players[0];
+      migrateHost(room, heir);
+    }
     if (room.players.length === 0) {
       clearTurnDeadline(room);
       rooms.delete(room.code);

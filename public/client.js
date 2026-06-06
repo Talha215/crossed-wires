@@ -1036,6 +1036,87 @@ $('btn-download').addEventListener('click', () => {
   URL.revokeObjectURL(a.href);
 });
 
+// Renders the story as a PNG card sized for Discord and downloads it.
+$('btn-share-img').addEventListener('click', () => {
+  const W = 1080, PAD = 70;
+  const c = document.createElement('canvas');
+  const ctx = c.getContext('2d');
+
+  const wrap = (text, font, maxW) => {
+    ctx.font = font;
+    const lines = [];
+    for (const rawLine of text.split('\n')) {
+      let line = '';
+      for (const word of rawLine.split(' ')) {
+        const probe = line ? line + ' ' + word : word;
+        if (ctx.measureText(probe).width > maxW && line) {
+          lines.push(line);
+          line = word;
+        } else {
+          line = probe;
+        }
+      }
+      lines.push(line);
+    }
+    return lines;
+  };
+
+  const TITLE_FONT = 'bold 52px Georgia, serif';
+  const BODY_FONT = '32px Georgia, serif';
+  const META_FONT = '26px system-ui, sans-serif';
+  const storyText = revealData.contributions.map(x => x.text).join(' ');
+  const titleLines = wrap(revealData.title, TITLE_FONT, W - PAD * 2);
+  const bodyLines = wrap(storyText, BODY_FONT, W - PAD * 2);
+
+  const doodleH = canvasStrokes.length ? 420 : 0;
+  const H = PAD + titleLines.length * 62 + 40 + bodyLines.length * 46 +
+    (doodleH ? doodleH + 40 : 0) + 90;
+  c.width = W;
+  c.height = H;
+
+  ctx.fillStyle = '#14121f';
+  ctx.fillRect(0, 0, W, H);
+
+  let y = PAD + 40;
+  ctx.fillStyle = '#ffb454';
+  ctx.font = TITLE_FONT;
+  for (const line of titleLines) { ctx.fillText(line, PAD, y); y += 62; }
+
+  y += 30;
+  ctx.fillStyle = '#f0edf7';
+  ctx.font = BODY_FONT;
+  for (const line of bodyLines) { ctx.fillText(line, PAD, y); y += 46; }
+
+  if (doodleH) {
+    y += 20;
+    const dw = 520, dh = 390, dx = (W - dw) / 2;
+    ctx.fillStyle = '#262238';
+    ctx.fillRect(dx, y, dw, dh);
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(dx, y, dw, dh);
+    ctx.clip();
+    ctx.translate(dx, y);
+    for (const s of canvasStrokes) strokePath(ctx, s, dw, dh);
+    ctx.restore();
+    y += dh;
+  }
+
+  ctx.fillStyle = '#9b94b3';
+  ctx.font = META_FONT;
+  const names = revealData.contributions.map(x => x.name)
+    .filter((n, i, a) => a.indexOf(n) === i).join(', ');
+  ctx.fillText(`🔌 Crossed Wires · ${names} · ${new Date().toLocaleDateString()}`, PAD, H - 40);
+
+  c.toBlob(blob => {
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(blob);
+    a.download = `${revealData.title.replace(/[^\w\s-]/g, '').trim().replace(/\s+/g, '-').toLowerCase() || 'story'}.png`;
+    a.click();
+    URL.revokeObjectURL(a.href);
+  });
+});
+
 $('btn-new-game').addEventListener('click', () => socket.emit('new_game'));
 
 // ---- paced reveal + voting ----
