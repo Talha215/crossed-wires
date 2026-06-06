@@ -49,6 +49,19 @@
       <div id="host-controls" hidden>
         <label for="turns-input">Number of turns</label>
         <input id="turns-input" type="number" min="2" max="30" value="8" inputmode="numeric">
+        <label for="theme-input">Story theme</label>
+        <select id="theme-input">
+          <option value="classic" selected>🎲 Anything goes</option>
+          <option value="surprise">❓ Surprise me</option>
+          <option value="noir">🕵️ Film noir</option>
+          <option value="fantasy">🐉 Fantasy quest</option>
+          <option value="naturedoc">🦁 Nature documentary</option>
+          <option value="office">📎 Office drama</option>
+          <option value="scifi">🚀 Space opera</option>
+          <option value="horror">🕯️ Campfire horror</option>
+          <option value="fairytale">🏰 Fractured fairy tale</option>
+          <option value="heist">💰 The heist</option>
+        </select>
         <label for="timer-input">Turn timer</label>
         <select id="timer-input">
           <option value="0" selected>Off — no time limit</option>
@@ -104,7 +117,20 @@
     <section id="screen-reveal" class="screen" hidden>
       <p class="muted small">The story you wrote together…</p>
       <h2 id="reveal-title" class="reveal-title"></h2>
-      <p class="muted small">Hover or tap any part of the story to see who wrote it and the hint they were given.</p>
+      <p id="reveal-tip" class="muted small">Hover or tap any part of the story to see who wrote it and the hint they were given.</p>
+
+      <div id="perform-bar" hidden>
+        <p id="perform-status" class="muted small perform-status"></p>
+        <div id="perform-controls" class="host-row" hidden>
+          <button id="btn-reveal-next" class="primary">▶ Reveal next</button>
+          <button id="btn-reveal-all" class="ghost">Skip — show everything</button>
+        </div>
+      </div>
+
+      <div id="vote-bar" class="vote-bar" hidden>
+        <p id="vote-status"></p>
+        <button id="btn-end-vote" class="ghost" hidden>End voting now</button>
+      </div>
 
       <div class="reveal-layout">
         <div id="reveal-story" class="story-prose"></div>
@@ -114,6 +140,7 @@
             <div id="hint-author" class="hint-author"></div>
             <div class="hint-label">🤫 The hint they saw:</div>
             <div id="hint-text" class="hint-text"></div>
+            <button id="btn-vote-this" class="vote-this" hidden>👑 Vote for this line</button>
           </div>
         </aside>
       </div>

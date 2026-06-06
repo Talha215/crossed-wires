@@ -33,7 +33,7 @@ function runClaude(prompt) {
   });
 }
 
-function generateHint(storySoFar, { isFinalTurn = false, turnIndex = 1, turnsTotal = 8 } = {}) {
+function generateHint(storySoFar, { isFinalTurn = false, turnIndex = 1, turnsTotal = 8, theme = null } = {}) {
   // Tell the model where we are in the story arc so hints create forward
   // motion instead of an endless loop of reactions to the latest event.
   const progress = turnsTotal > 1 ? turnIndex / (turnsTotal - 1) : 1;
@@ -56,7 +56,7 @@ function generateHint(storySoFar, { isFinalTurn = false, turnIndex = 1, turnsTot
 You are given the full story so far. The next player will write the next 1-3 sentences WITHOUT seeing any of it, using only your hint.
 
 Story position: turn ${turnIndex + 1} of ${turnsTotal}. ${beat}
-
+${theme ? `The story's theme: ${theme}. Keep your hint and the mandatory element leaning into that flavor.\n` : ''}
 Write a hint (2-3 sentences) that:
 - Conveys the story's momentum and tone — where things seem to be heading, and the energy level.
 - Hides the specifics: never name the story's characters, objects, or exact events. Refer to them obliquely or not at all. NEVER quote the story.

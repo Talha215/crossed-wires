@@ -11,7 +11,11 @@ const screens = ['home', 'lobby', 'game', 'reveal'];
 let session = null;       // { code, token, name } — persisted for reconnects
 let summary = null;       // latest room_update
 let myTurn = null;        // payload of last your_turn (valid while turnIndex matches)
-let revealData = null;    // payload of reveal
+let revealData = null;    // full reveal payload (only after the performance ends)
+let perf = null;          // { steps: [], total } while the host unveils passages
+let voteState = { voted: 0, eligible: 0 };
+let myVote = null;        // index I voted for
+let voteResult = null;    // { counts, winners } once tallied
 let speaking = false;
 
 // ---------------------------------------------------------------------------
@@ -533,8 +537,8 @@ function render() {
     case 'thinking':
     case 'titling': renderGame(); break;
     case 'reveal':
-      if (revealData) renderReveal();
-      else renderGame(); // reveal payload is on its way
+      if (revealData || perf) renderReveal();
+      else renderGame(); // reveal_begin is on its way
       break;
   }
 }
@@ -573,7 +577,8 @@ function renderLobby() {
 function renderGame() {
   show('game');
   $('turn-label').textContent =
-    `Turn ${Math.min(summary.turnIndex + 1, summary.turnsTotal)} of ${summary.turnsTotal}`;
+    `Turn ${Math.min(summary.turnIndex + 1, summary.turnsTotal)} of ${summary.turnsTotal}` +
+    (summary.themeLabel ? ` · ${summary.themeLabel}` : '');
   updateCountdown();
 
   const amActive = !!(me() && me().isActive);
@@ -631,24 +636,88 @@ function renderGame() {
   }
 }
 
+function hostName() {
+  const h = summary && summary.players.find(p => p.isHost);
+  return h ? h.name : 'The host';
+}
+
+// Builds one story passage span with hint-panel (and voting) behavior.
+function buildSeg(story, i, c, isLast) {
+  const seg = document.createElement('span');
+  seg.className = 'seg';
+  if (voteResult && voteResult.winners.includes(i)) {
+    seg.classList.add('winner');
+    const crown = document.createElement('span');
+    crown.textContent = '👑 ';
+    seg.append(crown);
+  }
+  if (myVote === i && !voteResult) seg.classList.add('my-vote');
+  seg.append(document.createTextNode(c.text));
+  seg.addEventListener('mouseenter', () => showHintPanel(i, seg, c));
+  seg.addEventListener('click', e => { e.stopPropagation(); showHintPanel(i, seg, c); });
+  story.append(seg);
+  if (!isLast) story.append(' ');
+  return seg;
+}
+
 function renderReveal() {
   show('reveal');
   stopTitleFlash();
-  $('reveal-title').textContent = revealData.title;
+  if (revealData) renderFullReveal();
+  else renderPerformance();
+}
+
+// Performance mode: the host unveils one passage at a time; the client only
+// ever has the passages the server has sent so far.
+function renderPerformance() {
+  const steps = perf ? perf.steps.filter(Boolean) : [];
+  const total = perf ? perf.total : 0;
+
+  $('reveal-title').textContent = '🤫 . . .';
+  $('reveal-tip').hidden = true;
+  $('vote-bar').hidden = true;
+  $('reveal-doodle').hidden = true;
+  document.querySelector('.reveal-actions').hidden = true;
 
   const story = $('reveal-story');
   story.innerHTML = '';
   clearHintPanel();
-  revealData.contributions.forEach((c, i) => {
-    const seg = document.createElement('span');
-    seg.className = 'seg';
-    seg.textContent = c.text;
-    seg.addEventListener('mouseenter', () => showHintPanel(i, seg));
-    seg.addEventListener('click', e => { e.stopPropagation(); showHintPanel(i, seg); });
-    story.append(seg);
-    if (i < revealData.contributions.length - 1) story.append(' ');
-  });
+  let lastSeg = null;
+  steps.forEach((s, i) => { lastSeg = buildSeg(story, i, s, i === steps.length - 1); });
+  // Spotlight the newest passage (auto-open only where the panel is a
+  // sidebar, not the mobile bottom sheet).
+  if (lastSeg && window.matchMedia('(min-width: 720px)').matches) {
+    showHintPanel(steps.length - 1, lastSeg, steps[steps.length - 1]);
+  }
 
+  $('perform-bar').hidden = false;
+  const isHost = !!(me() && me().isHost);
+  $('perform-controls').hidden = !isHost;
+  if (isHost) {
+    $('perform-status').textContent = steps.length === 0
+      ? 'The story is done! Unveil it passage by passage — read them aloud as you go.'
+      : '';
+    $('btn-reveal-next').textContent = steps.length < total
+      ? `▶ Reveal next passage (${steps.length}/${total})`
+      : '🎬 Reveal the title!';
+  } else {
+    $('perform-status').textContent = `🎭 ${hostName()} is unveiling the story (${steps.length}/${total})…`;
+  }
+}
+
+function renderFullReveal() {
+  $('reveal-title').textContent = revealData.title;
+  $('reveal-tip').hidden = false;
+  $('perform-bar').hidden = true;
+  document.querySelector('.reveal-actions').hidden = false;
+
+  const story = $('reveal-story');
+  story.innerHTML = '';
+  clearHintPanel();
+  revealData.contributions.forEach((c, i) =>
+    buildSeg(story, i, c, i === revealData.contributions.length - 1));
+
+  renderVoteBar();
   $('btn-new-game').hidden = !(me() && me().isHost);
 
   // The communal masterpiece, if anyone actually doodled.
@@ -666,11 +735,29 @@ function renderReveal() {
   }
 }
 
+function renderVoteBar() {
+  const bar = $('vote-bar');
+  if (!revealData) { bar.hidden = true; return; }
+  bar.hidden = false;
+  if (voteResult) {
+    const { counts, winners } = voteResult;
+    $('vote-status').textContent = winners.length
+      ? '👑 Best line: ' + winners.map(i =>
+          `${revealData.contributions[i].name} (turn ${i + 1}, ${counts[i]} vote${counts[i] === 1 ? '' : 's'})`
+        ).join(' & ')
+      : 'No votes were cast — the real winner was the chaos along the way.';
+    $('btn-end-vote').hidden = true;
+  } else {
+    $('vote-status').textContent =
+      `👑 Vote for the best line — tap a passage, then “Vote” on its hint card (${voteState.voted}/${voteState.eligible} voted)`;
+    $('btn-end-vote').hidden = !(me() && me().isHost);
+  }
+}
+
 // Highlight one contribution's sentences and show its author + hint in the
 // side panel (a bottom sheet on phones). The selection sticks until another
 // passage is hovered/tapped, so the panel never flickers mid-read.
-function showHintPanel(i, seg) {
-  const c = revealData.contributions[i];
+function showHintPanel(i, seg, c) {
   for (const el of document.querySelectorAll('.seg.lit')) el.classList.remove('lit');
   seg.classList.add('lit');
   $('hint-placeholder').hidden = true;
@@ -678,6 +765,17 @@ function showHintPanel(i, seg) {
   $('hint-author').textContent = `Turn ${i + 1} — written by ${c.name}`;
   $('hint-text').textContent = c.hint;
   $('hint-panel').classList.add('active');
+
+  // Voting happens from here: deliberate, and impossible to fat-finger
+  // while just browsing hints.
+  const voteBtn = $('btn-vote-this');
+  const voteActive = revealData && !voteResult;
+  const isOwn = session && c.name === session.name;
+  voteBtn.hidden = !voteActive || isOwn;
+  if (!voteBtn.hidden) {
+    voteBtn.textContent = myVote === i ? '✓ Your vote!' : '👑 Vote for this line';
+    voteBtn.dataset.index = i;
+  }
 }
 
 function clearHintPanel() {
@@ -704,7 +802,9 @@ socket.on('room_update', s => {
     playJoinSound();
   }
   summary = s;
-  if (s.status !== 'reveal') revealData = null;
+  if (s.status !== 'reveal') {
+    revealData = perf = voteResult = myVote = null;
+  }
   render();
 });
 
@@ -715,10 +815,34 @@ socket.on('your_turn', payload => {
   render();
 });
 
-socket.on('reveal', payload => {
-  revealData = payload;
+socket.on('reveal_begin', ({ total }) => {
+  perf = { steps: [], total };
+  revealData = null;
+  myVote = voteResult = null;
   stopSpeaking();
   render();
+});
+
+socket.on('reveal_step', step => {
+  if (!perf) perf = { steps: [], total: step.total };
+  perf.steps[step.index] = step;
+  render();
+});
+
+socket.on('reveal_complete', payload => {
+  revealData = payload;
+  perf = null;
+  render();
+});
+
+socket.on('vote_update', v => {
+  voteState = v;
+  if (revealData) renderVoteBar();
+});
+
+socket.on('vote_result', r => {
+  voteResult = r;
+  render(); // re-render to crown the winners
 });
 
 socket.on('error_msg', toast);
@@ -737,6 +861,15 @@ socket.on('connect', () => {
     summary = res.summary;
     if (res.yourTurn) myTurn = res.yourTurn;
     if (res.reveal) revealData = res.reveal;
+    if (res.revealProgress) {
+      perf = { total: res.revealProgress.total, steps: [] };
+      for (const s of res.revealProgress.steps) perf.steps[s.index] = s;
+    }
+    if (res.voteState) {
+      voteState = res.voteState;
+      myVote = res.voteState.myVote;
+      voteResult = res.voteState.result;
+    }
     if (res.canvas) { canvasStrokes = res.canvas; pendingStrokes = []; }
     render();
   });
@@ -796,6 +929,7 @@ $('btn-start').addEventListener('click', () => {
   socket.emit('start_game', {
     turns: $('turns-input').value,
     timerSecs: $('timer-input').value,
+    theme: $('theme-input').value,
   });
 });
 
@@ -903,6 +1037,29 @@ $('btn-download').addEventListener('click', () => {
 });
 
 $('btn-new-game').addEventListener('click', () => socket.emit('new_game'));
+
+// ---- paced reveal + voting ----
+
+$('btn-reveal-next').addEventListener('click', () => socket.emit('reveal_next'));
+
+$('btn-reveal-all').addEventListener('click', () => {
+  if (confirm('Skip the performance and show the whole story?')) socket.emit('reveal_all');
+});
+
+$('btn-vote-this').addEventListener('click', e => {
+  e.stopPropagation(); // don't let the mobile bottom sheet swallow the tap
+  const i = +e.target.dataset.index;
+  myVote = i;
+  socket.emit('cast_vote', { index: i });
+  e.target.textContent = '✓ Your vote!';
+  for (const el of document.querySelectorAll('.seg.my-vote')) el.classList.remove('my-vote');
+  const segs = document.querySelectorAll('#reveal-story .seg');
+  if (segs[i]) segs[i].classList.add('my-vote');
+});
+
+$('btn-end-vote').addEventListener('click', () => {
+  if (confirm('Close the vote and crown the winner now?')) socket.emit('end_vote');
+});
 
 // ---------------------------------------------------------------------------
 

@@ -28,6 +28,67 @@ const STARTER_PROMPT =
   'You are starting the story! Write the opening 1–3 sentences. ' +
   'Set a scene, introduce someone or something — anything goes.';
 
+// Story themes: the starter seeds turn 1, the flavor seasons every AI hint.
+const THEMES = {
+  classic: {
+    label: '🎲 Anything goes',
+    starter: STARTER_PROMPT,
+    flavor: null,
+  },
+  noir: {
+    label: '🕵️ Film noir',
+    starter: 'Start a hard-boiled detective story: a rain-soaked city, a narrator with regrets, trouble about to walk through the door. Write the opening 1–3 sentences.',
+    flavor: 'a hard-boiled film noir detective story (moody narration, questionable choices)',
+  },
+  fantasy: {
+    label: '🐉 Fantasy quest',
+    starter: 'Start an epic fantasy quest: a hero (loosely defined), a land in peril, a prophecy nobody read carefully. Write the opening 1–3 sentences.',
+    flavor: 'an epic and increasingly ridiculous fantasy quest',
+  },
+  naturedoc: {
+    label: '🦁 Nature documentary',
+    starter: 'Start a nature documentary: narrate someone or something as if a hushed documentary crew is observing it in the wild. Write the opening 1–3 sentences.',
+    flavor: 'a hushed, dramatic nature documentary narration of its subjects',
+  },
+  office: {
+    label: '📎 Office drama',
+    starter: 'Start a petty workplace drama: an office, a grievance, stakes that are both tiny and enormous. Write the opening 1–3 sentences.',
+    flavor: 'a petty workplace drama where tiny stakes feel enormous',
+  },
+  scifi: {
+    label: '🚀 Space opera',
+    starter: 'Start a melodramatic space opera: a ship, a crew, something blinking red that should not be blinking red. Write the opening 1–3 sentences.',
+    flavor: 'a melodramatic space opera',
+  },
+  horror: {
+    label: '🕯️ Campfire horror',
+    starter: 'Start a campfire horror story: somewhere dark, someone who should not be there, a sound that has no business existing. Write the opening 1–3 sentences.',
+    flavor: 'a campfire horror story — spooky but ultimately silly',
+  },
+  fairytale: {
+    label: '🏰 Fractured fairy tale',
+    starter: 'Start a fairy tale that is about to go off the rails: once upon a time, somewhere enchanted, something is not quite right. Write the opening 1–3 sentences.',
+    flavor: 'a classic fairy tale going progressively off the rails',
+  },
+  heist: {
+    label: '💰 The heist',
+    starter: 'Start a heist story: a crew, a target, a plan with at least one obvious flaw nobody mentions. Write the opening 1–3 sentences.',
+    flavor: 'a high-stakes heist executed by overconfident incompetents',
+  },
+};
+
+function resolveTheme(id) {
+  if (id === 'surprise') {
+    const pool = Object.keys(THEMES).filter(k => k !== 'classic');
+    return pool[crypto.randomInt(pool.length)];
+  }
+  return THEMES[id] ? id : 'classic';
+}
+
+function themeStarter(room) {
+  return (THEMES[room.theme] || THEMES.classic).starter;
+}
+
 // Doodle canvas: bright colors that read well on the dark canvas background.
 const COLORS = [
   '#ff6b6b', '#ffb454', '#ffe066', '#7ee08a', '#4ecdc4', '#76d7ea',
@@ -60,9 +121,12 @@ function loadStories() {
 }
 
 function archiveStory(room) {
+  const id = crypto.randomBytes(8).toString('hex');
+  room.archiveId = id; // so the vote result can be attached later
   archive.unshift({
-    id: crypto.randomBytes(8).toString('hex'),
+    id,
     title: room.title,
+    theme: room.theme,
     finishedAt: Date.now(),
     players: room.players.map(p => p.name),
     contributions: room.contributions.map(c => ({ name: c.name, text: c.text, hint: c.hint })),
@@ -173,6 +237,15 @@ function load() {
       if (!room.lastActivity) room.lastActivity = Date.now();
       // Migrate saves from before the turn timer existed.
       if (room.timerSecs === undefined) { room.timerSecs = 0; room.turnDeadline = null; }
+      // Migrate saves from before themes / paced reveal / voting existed.
+      if (!room.theme) room.theme = 'classic';
+      if (room.revealDone === undefined) {
+        room.revealed = room.contributions.length;
+        room.revealDone = room.status === 'reveal';
+        room.votes = {};
+        room.voteResult = null;
+        room.archiveId = null;
+      }
       rooms.set(room.code, room);
     }
     console.log(`Restored ${rooms.size} room(s) from ${path.basename(STATE_FILE)}`);
@@ -289,6 +362,7 @@ function roomSummary(room) {
     activeName: active ? active.name : null,
     timerSecs: room.timerSecs || 0,
     turnDeadline: room.status === 'playing' ? room.turnDeadline : null,
+    themeLabel: room.status === 'lobby' ? null : (THEMES[room.theme] || THEMES.classic).label,
     players: room.players.map(p => ({
       name: p.name,
       color: p.color,
@@ -310,7 +384,7 @@ function turnPayload(room) {
     turnIndex: room.turnIndex,
     turnsTotal: room.turnsTotal,
     promptType: room.turnIndex === 0 ? 'starter' : 'hint',
-    prompt: room.turnIndex === 0 ? STARTER_PROMPT : room.currentHint,
+    prompt: room.turnIndex === 0 ? themeStarter(room) : room.currentHint,
   };
 }
 
@@ -430,6 +504,7 @@ async function prepareTurn(room) {
     isFinalTurn: room.turnIndex === room.turnsTotal - 1,
     turnIndex: room.turnIndex,
     turnsTotal: room.turnsTotal,
+    theme: (THEMES[room.theme] || THEMES.classic).flavor,
   };
   let hint;
   try {
@@ -473,10 +548,73 @@ async function finishStory(room) {
 
   room.title = title;
   room.status = 'reveal';
+  // Performance mode: nothing is revealed yet — the host unveils passage by
+  // passage. Text is only sent to clients as each step is revealed, so the
+  // no-peeking guarantee holds right up to the moment each line is shown.
+  room.revealed = 0;
+  room.revealDone = false;
+  room.votes = {};
+  room.voteResult = null;
   archiveStory(room);
   save();
   broadcast(room);
-  io.to(room.code).emit('reveal', revealPayload(room));
+  io.to(room.code).emit('reveal_begin', { total: room.contributions.length });
+}
+
+function revealStep(room, i) {
+  const c = room.contributions[i];
+  return { index: i, total: room.contributions.length, name: c.name, text: c.text, hint: c.hint };
+}
+
+function completeReveal(room) {
+  room.revealDone = true;
+  room.revealed = room.contributions.length;
+  save();
+  io.to(room.code).emit('reveal_complete', revealPayload(room));
+  broadcastVoteProgress(room);
+}
+
+// ---------------------------------------------------------------------------
+// Funniest-line vote — runs on the reveal screen once everything is shown.
+// ---------------------------------------------------------------------------
+
+function eligibleVoters(room) {
+  return room.players.filter(p => p.connected);
+}
+
+function broadcastVoteProgress(room) {
+  if (room.voteResult) return;
+  io.to(room.code).emit('vote_update', {
+    voted: Object.keys(room.votes).length,
+    eligible: eligibleVoters(room).length,
+  });
+}
+
+function maybeTallyVotes(room) {
+  const eligible = eligibleVoters(room);
+  if (eligible.length && eligible.every(p => room.votes[p.token] !== undefined)) {
+    tallyVotes(room);
+  }
+}
+
+function tallyVotes(room) {
+  if (room.voteResult) return;
+  const counts = room.contributions.map(() => 0);
+  for (const idx of Object.values(room.votes)) counts[idx]++;
+  const max = Math.max(0, ...counts);
+  const winners = max > 0 ? counts.flatMap((c, i) => (c === max ? [i] : [])) : [];
+  room.voteResult = { counts, winners };
+  // crown the winners in the permanent archive too
+  if (room.archiveId) {
+    const entry = archive.find(s => s.id === room.archiveId);
+    if (entry) {
+      entry.voteWinners = winners;
+      entry.voteCounts = counts;
+      atomicWrite(STORIES_FILE, JSON.stringify(archive, null, 2));
+    }
+  }
+  save();
+  io.to(room.code).emit('vote_result', room.voteResult);
 }
 
 // Resume any AI work that was in flight when the server last stopped.
@@ -528,6 +666,12 @@ io.on('connection', socket => {
       lastActivity: Date.now(),
       timerSecs: 0,
       turnDeadline: null,
+      theme: 'classic',
+      revealed: 0,
+      revealDone: false,
+      votes: {},
+      voteResult: null,
+      archiveId: null,
     };
     rooms.set(room.code, room);
     attach(room, token);
@@ -583,12 +727,27 @@ io.on('connection', socket => {
       view.yourTurn = turnPayload(room); // private — only this socket
     }
     if (room.status === 'reveal') {
-      view.reveal = revealPayload(room);
+      if (room.revealDone) {
+        view.reveal = revealPayload(room);
+        view.voteState = {
+          voted: Object.keys(room.votes).length,
+          eligible: eligibleVoters(room).length,
+          myVote: room.votes[token] !== undefined ? room.votes[token] : null,
+          result: room.voteResult,
+        };
+      } else {
+        // mid-performance: only the passages revealed so far
+        view.revealProgress = {
+          total: room.contributions.length,
+          steps: room.contributions.slice(0, room.revealed)
+            .map((c, i) => revealStep(room, i)),
+        };
+      }
     }
     cb(view);
   });
 
-  socket.on('start_game', ({ turns, timerSecs }) => {
+  socket.on('start_game', ({ turns, timerSecs, theme }) => {
     const room = getRoom();
     if (!room || !isHost(room) || room.status !== 'lobby') return;
     if (room.players.length < 2) {
@@ -596,6 +755,7 @@ io.on('connection', socket => {
     }
     room.turnsTotal = Math.min(30, Math.max(2, parseInt(turns, 10) || DEFAULT_TURNS));
     room.timerSecs = [0, 60, 90, 120].includes(+timerSecs) ? +timerSecs : 0;
+    room.theme = resolveTheme(theme);
     room.turnIndex = 0;
     room.contributions = [];
     room.title = null;
@@ -619,7 +779,7 @@ io.on('connection', socket => {
       token: player.token,
       name: player.name,
       text,
-      hint: room.turnIndex === 0 ? STARTER_PROMPT : room.currentHint,
+      hint: room.turnIndex === 0 ? themeStarter(room) : room.currentHint,
     });
     room.turnIndex++;
     room.orderPos = (room.orderPos + 1) % room.order.length;
@@ -652,6 +812,46 @@ io.on('connection', socket => {
     finishStory(room);
   });
 
+  // ---- paced reveal + voting ----------------------------------------------
+
+  socket.on('reveal_next', () => {
+    const room = getRoom();
+    if (!room || !isHost(room) || room.status !== 'reveal' || room.revealDone) return;
+    if (room.revealed < room.contributions.length) {
+      const step = revealStep(room, room.revealed++);
+      save();
+      io.to(room.code).emit('reveal_step', step);
+    } else {
+      completeReveal(room); // one tap past the last passage = the title finale
+    }
+  });
+
+  socket.on('reveal_all', () => {
+    const room = getRoom();
+    if (!room || !isHost(room) || room.status !== 'reveal' || room.revealDone) return;
+    completeReveal(room);
+  });
+
+  socket.on('cast_vote', ({ index }) => {
+    const room = getRoom();
+    if (!room || room.status !== 'reveal' || !room.revealDone || room.voteResult) return;
+    const player = findPlayer(room, socket.data.token);
+    if (!player) return;
+    index = parseInt(index, 10);
+    const c = room.contributions[index];
+    if (!c || c.token === player.token) return; // no voting for your own line
+    room.votes[player.token] = index; // re-votes allowed until the tally
+    save();
+    broadcastVoteProgress(room);
+    maybeTallyVotes(room);
+  });
+
+  socket.on('end_vote', () => {
+    const room = getRoom();
+    if (!room || !isHost(room) || room.status !== 'reveal' || !room.revealDone) return;
+    tallyVotes(room);
+  });
+
   // Host resets the room to the lobby; players stay, story is wiped.
   socket.on('new_game', () => {
     const room = getRoom();
@@ -661,6 +861,7 @@ io.on('connection', socket => {
       status: 'lobby', turnIndex: 0, order: [], orderPos: 0,
       contributions: [], currentHint: null, title: null,
       canvas: { strokes: [], nextId: 1 },
+      revealed: 0, revealDone: false, votes: {}, voteResult: null, archiveId: null,
     });
     save();
     broadcast(room);
@@ -802,6 +1003,11 @@ io.on('connection', socket => {
       player.socketId = null;
       save();
       broadcast(room);
+      // a vote may now be unanimous among those still here
+      if (room.status === 'reveal' && room.revealDone && !room.voteResult) {
+        broadcastVoteProgress(room);
+        maybeTallyVotes(room);
+      }
     }
   });
 });

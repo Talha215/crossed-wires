@@ -212,6 +212,30 @@ body.doodle-wide .host-row { max-width: 640px; margin-left: auto; margin-right: 
 }
 .seg:hover { background: rgba(255, 180, 84, 0.12); }
 .seg.lit { background: rgba(255, 180, 84, 0.25); }
+.seg.my-vote { box-shadow: inset 0 -2px 0 var(--accent); }
+.seg.winner { background: rgba(255, 215, 0, 0.16); }
+
+/* ---- paced reveal + voting ---- */
+.perform-status { text-align: center; }
+#perform-bar .host-row { margin-top: 10px; }
+.vote-bar {
+  background: var(--card);
+  border: 1px solid var(--card-2);
+  border-radius: var(--radius);
+  padding: 10px 14px;
+  margin-top: 14px;
+  text-align: center;
+}
+.vote-bar p { margin: 0 0 6px; }
+.vote-bar button { font-size: 0.9rem; padding: 6px 14px; }
+.vote-this {
+  margin-top: 10px;
+  width: 100%;
+  background: var(--accent);
+  color: var(--accent-ink);
+  font-size: 0.95rem;
+  padding: 8px 12px;
+}
 
 .hint-panel {
   background: var(--card);

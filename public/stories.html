@@ -129,7 +129,12 @@
       story.contributions.forEach((c, i) => {
         const seg = document.createElement('span');
         seg.className = 'seg';
-        seg.textContent = c.text;
+        if (story.voteWinners && story.voteWinners.includes(i)) {
+          seg.className += ' winner';
+          seg.textContent = '👑 ' + c.text;
+        } else {
+          seg.textContent = c.text;
+        }
         const reveal = () => {
           for (const el of document.querySelectorAll('.seg.lit')) el.classList.remove('lit');
           seg.classList.add('lit');
