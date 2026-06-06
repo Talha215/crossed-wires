@@ -303,14 +303,18 @@ async function prepareTurn(room) {
   save();
   broadcast(room);
 
-  const isFinalTurn = room.turnIndex === room.turnsTotal - 1;
+  const hintOpts = {
+    isFinalTurn: room.turnIndex === room.turnsTotal - 1,
+    turnIndex: room.turnIndex,
+    turnsTotal: room.turnsTotal,
+  };
   let hint;
   try {
-    hint = await generateHint(fullStory(room), { isFinalTurn });
+    hint = await generateHint(fullStory(room), hintOpts);
   } catch (err) {
     console.error('generateHint failed, retrying once:', err.message);
     try {
-      hint = await generateHint(fullStory(room), { isFinalTurn });
+      hint = await generateHint(fullStory(room), hintOpts);
     } catch (err2) {
       console.error('generateHint failed again, using fallback:', err2.message);
       hint = FALLBACK_HINT;
