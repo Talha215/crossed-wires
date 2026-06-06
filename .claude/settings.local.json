@@ -1,0 +1,19 @@
+{
+  "permissions": {
+    "allow": [
+      "PowerShell(npm install *)",
+      "PowerShell(node -e \"require\\('./aiWorker'\\).generateHint\\('Once upon a time, a moose stole a city bus.'\\).then\\(h => console.log\\('HINT OK:\\\\n' + h\\)\\).catch\\(e => console.error\\('FAILED: ' + e.message\\)\\)\")",
+      "PowerShell(node e2e-runner.js)",
+      "PowerShell(npm start *)",
+      "PowerShell(try { \\(Get-Command cloudflared -ErrorAction Stop\\).Source } catch { \"not installed\" })",
+      "PowerShell(cloudflared tunnel *)",
+      "PowerShell(Start-Sleep -Seconds 4; Select-String -Path \"C:\\\\Users\\\\bmw21\\\\AppData\\\\Local\\\\Temp\\\\claude\\\\C--Users-bmw21-Documents-CrossedWires-crossed-wires\\\\cbc91cef-be5f-43ef-bfb8-fee04986b4db\\\\tasks\\\\bjobd1w7a.output\" -Pattern \"trycloudflare.com\" | Select-Object -First 3 | ForEach-Object Line)",
+      "PowerShell(\\(Invoke-WebRequest -Uri \"https://february-plymouth-helicopter-messaging.trycloudflare.com\" -UseBasicParsing\\).StatusCode)",
+      "PowerShell(node repro-test.js)",
+      "PowerShell(Remove-Item *)",
+      "PowerShell(node midjoin-test.js)",
+      "PowerShell(git init *)",
+      "PowerShell(git add *)"
+    ]
+  }
+}

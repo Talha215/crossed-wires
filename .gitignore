@@ -1,0 +1,12 @@
+# Dependencies
+node_modules/
+
+# Runtime state — live game data, not source
+game-state.json
+
+# Local tool config
+.claude/settings.local.json
+
+# OS noise
+Thumbs.db
+.DS_Store

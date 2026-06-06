@@ -1,0 +1,276 @@
+/* Crossed Wires — mobile-first, legible on phones and desktops alike. */
+
+:root {
+  --bg: #14121f;
+  --card: #1f1c2e;
+  --card-2: #2a2640;
+  --ink: #f0edf7;
+  --muted: #9b94b3;
+  --accent: #ffb454;
+  --accent-ink: #2a1c00;
+  --good: #7ee08a;
+  --bad: #ff7b7b;
+  --radius: 14px;
+}
+
+* { box-sizing: border-box; }
+
+/* The hidden attribute must always win, even over display:flex etc. */
+[hidden] { display: none !important; }
+
+html, body {
+  margin: 0;
+  padding: 0;
+  background: var(--bg);
+  color: var(--ink);
+  font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-size: 17px;
+  line-height: 1.55;
+}
+
+#app {
+  max-width: 640px;
+  margin: 0 auto;
+  padding: 24px 16px 48px;
+}
+
+.screen { animation: fade 0.25s ease; }
+@keyframes fade { from { opacity: 0; transform: translateY(6px); } to { opacity: 1; } }
+
+h1, h2 { line-height: 1.2; }
+.logo { text-align: center; font-size: 2.1rem; margin-bottom: 4px; }
+.tagline { text-align: center; color: var(--muted); margin-top: 0; }
+
+label { display: block; margin: 18px 0 6px; color: var(--muted); font-size: 0.95rem; }
+
+input, textarea {
+  width: 100%;
+  padding: 12px 14px;
+  border-radius: var(--radius);
+  border: 1.5px solid var(--card-2);
+  background: var(--card);
+  color: var(--ink);
+  font-size: 1.05rem;
+  font-family: inherit;
+}
+input:focus, textarea:focus { outline: 2px solid var(--accent); border-color: transparent; }
+textarea { resize: vertical; min-height: 110px; }
+
+button {
+  font-family: inherit;
+  font-size: 1.05rem;
+  font-weight: 600;
+  padding: 12px 20px;
+  border-radius: var(--radius);
+  border: none;
+  cursor: pointer;
+  background: var(--card-2);
+  color: var(--ink);
+  transition: filter 0.15s;
+  touch-action: manipulation;
+}
+button:hover { filter: brightness(1.15); }
+button:active { filter: brightness(0.9); }
+button:disabled { opacity: 0.55; cursor: wait; filter: none; }
+textarea:disabled { opacity: 0.55; }
+button.primary { background: var(--accent); color: var(--accent-ink); }
+button.ghost { background: transparent; border: 1.5px solid var(--card-2); color: var(--muted); }
+button.ghost.danger { color: var(--bad); border-color: #5c2c3a; }
+
+.home-actions { margin-top: 22px; display: flex; flex-direction: column; gap: 14px; }
+.home-actions .primary { width: 100%; }
+.join-row { display: flex; gap: 10px; }
+.join-row input { flex: 1; text-transform: uppercase; letter-spacing: 0.3em; text-align: center; }
+
+.error { color: var(--bad); text-align: center; }
+.muted { color: var(--muted); }
+.small { font-size: 0.9rem; }
+
+/* ---- lobby ---- */
+.room-code {
+  font-size: 3rem;
+  font-weight: 800;
+  letter-spacing: 0.35em;
+  text-align: center;
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 14px 0 14px 0.35em; /* compensate letter-spacing */
+  cursor: pointer;
+  user-select: all;
+}
+#screen-lobby h2 { text-align: center; margin-bottom: 8px; color: var(--muted); font-size: 1rem; text-transform: uppercase; letter-spacing: 0.1em; }
+#screen-lobby .muted { text-align: center; }
+
+.player-list { list-style: none; padding: 0; margin: 22px 0; display: flex; flex-direction: column; gap: 8px; }
+.player-list li {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 10px 16px;
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+.player-list .dot { width: 10px; height: 10px; border-radius: 50%; background: var(--good); flex: none; }
+.player-list .offline .dot { background: var(--muted); }
+.player-list .offline { opacity: 0.6; }
+.player-list .badge {
+  margin-left: auto;
+  font-size: 0.8rem;
+  background: var(--card-2);
+  border-radius: 99px;
+  padding: 2px 10px;
+  color: var(--muted);
+}
+.player-list .active-badge { background: var(--accent); color: var(--accent-ink); font-weight: 700; }
+
+#host-controls { margin-top: 10px; }
+#host-controls .primary { width: 100%; margin-top: 16px; }
+#btn-leave-lobby { width: 100%; margin-top: 14px; }
+
+/* ---- game ---- */
+.turn-counter { text-align: center; color: var(--muted); margin-bottom: 18px; letter-spacing: 0.05em; }
+.big-emoji { font-size: 3.5rem; text-align: center; margin: 36px 0 10px; }
+.waiting-text { text-align: center; font-size: 1.2rem; margin: 0 0 6px; }
+#game-waiting .muted { text-align: center; }
+
+.your-turn-banner {
+  text-align: center;
+  font-weight: 800;
+  font-size: 1.3rem;
+  color: var(--accent);
+  margin: 6px 0 14px;
+}
+.prompt-box {
+  background: var(--card);
+  border-left: 4px solid var(--accent);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-bottom: 14px;
+  white-space: pre-wrap;
+}
+.char-row { text-align: right; color: var(--muted); font-size: 0.85rem; margin: 6px 2px 12px; }
+#btn-submit { width: 100%; }
+
+.host-row { display: flex; gap: 10px; margin-top: 28px; }
+.host-row button { flex: 1; }
+
+/* ---- reveal ---- */
+.reveal-title { text-align: center; font-size: 1.7rem; margin: 6px 0 4px; }
+#screen-reveal .muted { text-align: center; }
+
+.reveal-layout { margin: 18px 0 22px; }
+
+/* The story reads as one continuous piece of prose. Each contribution is an
+   invisible inline segment that lights up on hover/tap. */
+.story-prose {
+  background: var(--card);
+  border-radius: var(--radius);
+  padding: 20px 22px;
+  font-size: 1.08rem;
+  line-height: 1.85;
+}
+.seg {
+  cursor: pointer;
+  border-radius: 6px;
+  padding: 1px 2px;
+  transition: background 0.15s;
+  -webkit-box-decoration-break: clone;
+  box-decoration-break: clone; /* highlight wraps nicely across lines */
+}
+.seg:hover { background: rgba(255, 180, 84, 0.12); }
+.seg.lit { background: rgba(255, 180, 84, 0.25); }
+
+.hint-panel {
+  background: var(--card);
+  border: 1px solid var(--card-2);
+  border-radius: var(--radius);
+  padding: 14px 16px;
+  margin-top: 14px;
+}
+.hint-panel p { margin: 0; }
+.hint-author { color: var(--accent); font-weight: 700; margin-bottom: 8px; }
+.hint-label { font-weight: 700; font-size: 0.9rem; margin-bottom: 4px; }
+.hint-text { color: var(--muted); font-size: 0.92rem; white-space: pre-wrap; }
+
+/* Wider screens: panel sits in a right column and follows you as you scroll. */
+@media (min-width: 720px) {
+  body.reveal-wide #app { max-width: 980px; }
+  .reveal-layout {
+    display: grid;
+    grid-template-columns: 1fr 300px;
+    gap: 16px;
+    align-items: start;
+  }
+  .hint-panel { position: sticky; top: 16px; margin-top: 0; }
+}
+
+/* Phones: the panel becomes a bottom sheet that appears when a passage is
+   tapped (tap the sheet to dismiss it). */
+@media (max-width: 719.98px) {
+  .hint-panel {
+    position: fixed;
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    z-index: 15;
+    margin: 0;
+    box-shadow: 0 8px 32px rgba(0, 0, 0, 0.55);
+  }
+  .hint-panel:not(.active) { display: none; }
+}
+
+.reveal-actions { display: flex; flex-direction: column; gap: 10px; margin-top: 10px; }
+.reveal-actions button { width: 100%; }
+
+/* ---- music controls ---- */
+.music-controls {
+  position: fixed;
+  top: 10px;
+  right: 10px;
+  z-index: 20;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  background: rgba(31, 28, 46, 0.9);
+  border: 1px solid var(--card-2);
+  border-radius: 99px;
+  padding: 4px 12px 4px 6px;
+}
+.music-controls button {
+  background: none;
+  padding: 4px 6px;
+  font-size: 1.1rem;
+  line-height: 1;
+}
+.music-controls input[type="range"] {
+  width: 80px;
+  padding: 0;
+  border: none;
+  background: transparent;
+  accent-color: var(--accent);
+}
+
+/* ---- toast ---- */
+.toast {
+  position: fixed;
+  bottom: 24px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--card-2);
+  color: var(--ink);
+  padding: 10px 20px;
+  border-radius: 99px;
+  box-shadow: 0 6px 24px rgba(0, 0, 0, 0.45);
+  z-index: 10;
+  max-width: 90vw;
+  text-align: center;
+}
+
+/* ---- wider screens ---- */
+@media (min-width: 560px) {
+  .home-actions { flex-direction: row; align-items: stretch; }
+  .home-actions .primary { width: auto; flex: 1; }
+  .join-row { flex: 1; }
+  .reveal-actions { flex-direction: row; flex-wrap: wrap; }
+  .reveal-actions button { width: auto; flex: 1; }
+}
