@@ -566,6 +566,33 @@ io.on('connection', socket => {
     io.to(room.code).emit('stroke_added', pub);
   });
 
+  // Live preview while someone draws: relay point batches to everyone else
+  // in the room. Ephemeral — nothing is stored; the draw_stroke commit on
+  // pointerup is the authoritative version.
+  socket.on('stroke_progress', ({ tag, points, width }) => {
+    const room = getRoom();
+    if (!room || !['playing', 'thinking', 'titling'].includes(room.status)) return;
+    const player = findPlayer(room, socket.data.token);
+    if (!player || !Array.isArray(points)) return;
+
+    const pts = [];
+    for (const p of points.slice(0, 60)) {
+      if (!Array.isArray(p) || typeof p[0] !== 'number' || typeof p[1] !== 'number') break;
+      const x = round3(p[0]), y = round3(p[1]);
+      if (![x, y].every(v => Number.isFinite(v) && v >= -0.05 && v <= 1.05)) break;
+      pts.push([x, y]);
+    }
+    if (!pts.length) return;
+
+    socket.to(room.code).emit('stroke_progress', {
+      name: player.name,
+      color: player.color, // server-assigned, same as committed strokes
+      width: Math.min(0.02, Math.max(0.002, +width || 0.006)),
+      tag: typeof tag === 'string' ? tag.slice(0, 16) : '',
+      points: pts,
+    });
+  });
+
   // Real-eraser semantics: rub out only the area under the cursor. Affected
   // strokes are split into surviving fragments. Own ink only, enforced here.
   socket.on('erase_at', ({ x, y, r }) => {

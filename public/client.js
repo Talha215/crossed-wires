@@ -187,8 +187,9 @@ let drawMode = 'draw';    // 'draw' | 'erase'
 const dCanvas = $('doodle-canvas');
 const dCtx = dCanvas.getContext('2d');
 const STROKE_WIDTH = 0.006;
-const ERASE_R = 0.03;     // eraser radius (normalized)
+const ERASE_R = 0.02;     // eraser radius (normalized)
 let erasePos = null;      // eraser ring position while in erase mode
+const liveStrokes = new Map(); // other players' in-progress strokes, by name|tag
 
 function myColor() {
   const p = summary && session && summary.players.find(p => p.name === session.name);
@@ -217,6 +218,11 @@ function redrawDoodle() {
   dCtx.clearRect(0, 0, dCanvas.width, dCanvas.height);
   for (const s of [...canvasStrokes, ...pendingStrokes]) {
     strokePath(dCtx, s, dCanvas.width, dCanvas.height);
+  }
+  for (const [key, live] of liveStrokes) {
+    // drop live strokes whose final commit never arrived (drawer vanished)
+    if (performance.now() - live.ts > 10000) { liveStrokes.delete(key); continue; }
+    strokePath(dCtx, live, dCanvas.width, dCanvas.height);
   }
   if (currentStroke) strokePath(dCtx, currentStroke, dCanvas.width, dCanvas.height);
   if (drawMode === 'erase' && erasePos) { // eraser ring cursor
@@ -265,6 +271,23 @@ function sendErase(p) {
   socket.emit('erase_at', { x: p[0], y: p[1], r: ERASE_R });
 }
 
+// Live streaming: batch the points drawn since the last flush (~every 50ms)
+// so other players watch the stroke appear in real time. These packets are
+// ephemeral — the draw_stroke commit on pointerup is what actually persists.
+let progressBuf = [];
+let lastProgressSent = 0;
+
+function flushProgress() {
+  if (!currentStroke || !progressBuf.length) return;
+  socket.emit('stroke_progress', {
+    tag: currentStroke.tag,
+    width: currentStroke.width,
+    points: progressBuf,
+  });
+  progressBuf = [];
+  lastProgressSent = performance.now();
+}
+
 dCanvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   dCanvas.setPointerCapture(e.pointerId);
@@ -276,7 +299,14 @@ dCanvas.addEventListener('pointerdown', e => {
     redrawDoodle();
     return;
   }
-  currentStroke = { color: myColor(), width: STROKE_WIDTH, points: [p] };
+  currentStroke = {
+    color: myColor(),
+    width: STROKE_WIDTH,
+    points: [p],
+    tag: Math.random().toString(36).slice(2, 10),
+  };
+  progressBuf = [p];
+  flushProgress(); // others see the stroke start immediately
   redrawDoodle();
 });
 
@@ -293,6 +323,8 @@ dCanvas.addEventListener('pointermove', e => {
   const last = currentStroke.points[currentStroke.points.length - 1];
   if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.004) return;
   currentStroke.points.push(p);
+  progressBuf.push(p);
+  if (performance.now() - lastProgressSent > 50) flushProgress();
   // draw just the new segment — no full redraw per move
   const W = dCanvas.width, H = dCanvas.height;
   dCtx.strokeStyle = currentStroke.color;
@@ -308,11 +340,11 @@ dCanvas.addEventListener('pointerleave', () => { erasePos = null; redrawDoodle()
 
 function finishStroke() {
   if (!currentStroke) return;
-  const tag = Math.random().toString(36).slice(2, 10);
-  const stroke = { ...currentStroke, tag };
+  const stroke = currentStroke;
   pendingStrokes.push(stroke); // keep it on screen until the server echoes it
-  socket.emit('draw_stroke', { points: stroke.points, width: stroke.width, tag });
+  socket.emit('draw_stroke', { points: stroke.points, width: stroke.width, tag: stroke.tag });
   currentStroke = null;
+  progressBuf = [];
 }
 dCanvas.addEventListener('pointerup', finishStroke);
 dCanvas.addEventListener('pointercancel', finishStroke);
@@ -320,11 +352,40 @@ dCanvas.addEventListener('pointercancel', finishStroke);
 socket.on('canvas_state', strokes => {
   canvasStrokes = strokes;
   pendingStrokes = [];
+  liveStrokes.clear();
   redrawDoodle();
 });
 
+// Another player's pen is moving — extend their live stroke segment by segment.
+socket.on('stroke_progress', s => {
+  const key = `${s.name}|${s.tag}`;
+  let live = liveStrokes.get(key);
+  if (!live) {
+    live = { color: s.color, width: s.width, points: [] };
+    liveStrokes.set(key, live);
+  }
+  live.ts = performance.now();
+  const W = dCanvas.width, H = dCanvas.height;
+  dCtx.strokeStyle = live.color;
+  dCtx.lineWidth = Math.max(1.5, live.width * W);
+  dCtx.lineCap = 'round';
+  for (const pt of s.points) {
+    const prev = live.points[live.points.length - 1];
+    if (prev) {
+      dCtx.beginPath();
+      dCtx.moveTo(prev[0] * W, prev[1] * H);
+      dCtx.lineTo(pt[0] * W, pt[1] * H);
+      dCtx.stroke();
+    }
+    live.points.push(pt);
+  }
+});
+
 socket.on('stroke_added', stroke => {
-  if (stroke.tag) pendingStrokes = pendingStrokes.filter(p => p.tag !== stroke.tag);
+  if (stroke.tag) {
+    pendingStrokes = pendingStrokes.filter(p => p.tag !== stroke.tag);
+    liveStrokes.delete(`${stroke.name}|${stroke.tag}`); // commit replaces the live preview
+  }
   canvasStrokes.push(stroke);
   strokePath(dCtx, stroke, dCanvas.width, dCanvas.height);
 });
