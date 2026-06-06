@@ -8,7 +8,15 @@ function runClaude(prompt) {
       '--model', 'haiku',     // fast + cheap; plenty for hints
       '--max-turns', '1',
       '--output-format', 'json',
-    ], { env: process.env });
+    ], {
+      // MAX_THINKING_TOKENS=0 disables extended thinking: hints went from
+      // ~659 output tokens / ~9.6s to ~70 tokens / ~2.9s, same quality.
+      env: { ...process.env, MAX_THINKING_TOKENS: '0' },
+    });
+
+    // Close stdin right away — otherwise the CLI waits 3 seconds for piped
+    // input before doing anything, on every single call.
+    child.stdin.end();
 
     let out = '', err = '';
     child.stdout.on('data', d => (out += d));
