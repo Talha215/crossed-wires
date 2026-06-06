@@ -1,11 +1,9 @@
 @echo off
-rem Launches the Crossed Wires game server.
+rem Launches the Crossed Wires game server on http://localhost:3000
 rem
-rem Permanent public URL (via Tailscale Funnel, runs as a service - no
-rem extra window needed):  https://talha-pc.tail444324.ts.net
-rem
-rem If the URL ever stops working, re-enable the funnel with:
-rem   tailscale funnel --bg 3000
+rem To let friends join from the internet, see "Letting friends join"
+rem in README.md. If you've set up Tailscale Funnel, your permanent URL
+rem is https://<your-machine>.<your-tailnet>.ts.net (run
+rem "tailscale funnel status" to see it).
 cd /d "%~dp0"
-echo Share link: https://talha-pc.tail444324.ts.net
 start "Crossed Wires - Server" cmd /k npm start
