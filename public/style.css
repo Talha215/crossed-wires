@@ -43,7 +43,7 @@ h1, h2 { line-height: 1.2; }
 
 label { display: block; margin: 18px 0 6px; color: var(--muted); font-size: 0.95rem; }
 
-input, textarea {
+input, textarea, select {
   width: 100%;
   padding: 12px 14px;
   border-radius: var(--radius);
@@ -129,6 +129,7 @@ button.ghost.danger { color: var(--bad); border-color: #5c2c3a; }
 
 /* ---- game ---- */
 .turn-counter { text-align: center; color: var(--muted); margin-bottom: 12px; letter-spacing: 0.05em; }
+#turn-timer.urgent { color: var(--bad); font-weight: 700; }
 .waiting-text { text-align: center; font-size: 1.15rem; margin: 0 0 6px; }
 #game-waiting .muted { text-align: center; }
 
@@ -281,6 +282,11 @@ body.doodle-wide .host-row { max-width: 640px; margin-left: auto; margin-right: 
   background: transparent;
   accent-color: var(--accent);
 }
+
+/* ---- archive link ---- */
+.archive-link { text-align: center; margin-top: 16px; font-size: 0.9rem; }
+.archive-link a { color: var(--muted); text-decoration: none; }
+.archive-link a:hover { color: var(--accent); }
 
 /* ---- toast ---- */
 .toast {

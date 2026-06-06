@@ -8,6 +8,7 @@
 </head>
 <body>
   <div class="music-controls">
+    <button id="btn-notify" title="Notify me when it's my turn" hidden>🔕</button>
     <button id="btn-mute" title="Mute music">🎵</button>
     <input id="music-volume" type="range" min="0" max="100" value="35"
       aria-label="Music volume">
@@ -44,15 +45,23 @@
       <div id="host-controls" hidden>
         <label for="turns-input">Number of turns</label>
         <input id="turns-input" type="number" min="2" max="30" value="8" inputmode="numeric">
+        <label for="timer-input">Turn timer</label>
+        <select id="timer-input">
+          <option value="0" selected>Off — no time limit</option>
+          <option value="60">60 seconds, then auto-skip</option>
+          <option value="90">90 seconds, then auto-skip</option>
+          <option value="120">2 minutes, then auto-skip</option>
+        </select>
         <button id="btn-start" class="primary">Start the story</button>
       </div>
       <p id="guest-wait" class="muted" hidden>Waiting for the host to start…</p>
       <button id="btn-leave-lobby" class="ghost">Leave</button>
+      <p class="archive-link"><a href="/stories" target="_blank">📚 Story archive</a></p>
     </section>
 
     <!-- ============ GAME ============ -->
     <section id="screen-game" class="screen" hidden>
-      <div id="turn-counter" class="turn-counter"></div>
+      <div class="turn-counter"><span id="turn-label"></span><span id="turn-timer"></span></div>
 
       <!-- waiting on another player or the AI -->
       <div id="game-waiting" hidden>
@@ -116,6 +125,7 @@
         <button id="btn-new-game" hidden>🔁 New game</button>
         <button id="btn-leave-reveal" class="ghost">Leave</button>
       </div>
+      <p class="archive-link"><a href="/stories" target="_blank">📚 This story is saved in the archive</a></p>
     </section>
 
     <div id="toast" class="toast" hidden></div>

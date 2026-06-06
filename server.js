@@ -20,6 +20,7 @@ const { generateHint, generateTitle } = require('./aiWorker');
 
 const PORT = 3000;
 const STATE_FILE = path.join(__dirname, 'game-state.json');
+const STORIES_FILE = path.join(__dirname, 'stories.json');
 const DEFAULT_TURNS = 8;
 const MAX_TEXT_LEN = 500;
 
@@ -46,6 +47,44 @@ const io = new Server(server);
 app.use(express.static(path.join(__dirname, 'public')));
 
 // ---------------------------------------------------------------------------
+// Story archive — finished stories are kept forever (rooms get swept, but
+// the stories your group wrote shouldn't vanish with them).
+// ---------------------------------------------------------------------------
+
+let archive = [];
+
+function loadStories() {
+  try {
+    archive = JSON.parse(fs.readFileSync(STORIES_FILE, 'utf8'));
+  } catch { /* no archive yet */ }
+}
+
+function archiveStory(room) {
+  archive.unshift({
+    id: crypto.randomBytes(8).toString('hex'),
+    title: room.title,
+    finishedAt: Date.now(),
+    players: room.players.map(p => p.name),
+    contributions: room.contributions.map(c => ({ name: c.name, text: c.text, hint: c.hint })),
+    strokes: publicStrokes(room),
+  });
+  fs.writeFileSync(STORIES_FILE, JSON.stringify(archive, null, 2));
+}
+
+app.get('/stories', (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'stories.html')));
+
+app.get('/api/stories', (req, res) =>
+  res.json(archive.map(({ id, title, finishedAt, players, contributions }) =>
+    ({ id, title, finishedAt, players, turns: contributions.length }))));
+
+app.get('/api/stories/:id', (req, res) => {
+  const story = archive.find(s => s.id === req.params.id);
+  if (!story) return res.status(404).json({ error: 'not found' });
+  res.json(story);
+});
+
+// ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
 
@@ -60,6 +99,8 @@ app.use(express.static(path.join(__dirname, 'public')));
  *   orderPos,                     // index into order of the active player
  *   canvas: { strokes: [{ id, token, name, color, width, points }], nextId },
  *   lastActivity,                 // ms epoch; stale rooms get swept
+ *   timerSecs,                    // host-set turn timer; 0 = off
+ *   turnDeadline,                 // ms epoch when the active turn auto-skips
  *   contributions: [{ token, name, text, hint }],      // hint = what they saw
  *   currentHint,                  // hint for the active player (null on turn 1)
  *   title,
@@ -97,6 +138,8 @@ function load() {
       room.players.forEach(p => { if (!p.color) p.color = pickColor(room); });
       // Pre-sweep saves have no timestamp — give them a fresh grace period.
       if (!room.lastActivity) room.lastActivity = Date.now();
+      // Migrate saves from before the turn timer existed.
+      if (room.timerSecs === undefined) { room.timerSecs = 0; room.turnDeadline = null; }
       rooms.set(room.code, room);
     }
     console.log(`Restored ${rooms.size} room(s) from ${path.basename(STATE_FILE)}`);
@@ -211,6 +254,8 @@ function roomSummary(room) {
     turnsTotal: room.turnsTotal,
     turnIndex: room.turnIndex,
     activeName: active ? active.name : null,
+    timerSecs: room.timerSecs || 0,
+    turnDeadline: room.status === 'playing' ? room.turnDeadline : null,
     players: room.players.map(p => ({
       name: p.name,
       color: p.color,
@@ -275,6 +320,7 @@ function sweepStaleRooms() {
     if (room.players.some(p => p.connected)) continue; // someone's still here
     const ttl = room.status === 'reveal' ? REVEAL_TTL : IDLE_TTL;
     if (now - room.lastActivity > ttl) {
+      clearTurnDeadline(room);
       rooms.delete(room.code);
       removed++;
     }
@@ -286,6 +332,49 @@ function sweepStaleRooms() {
 }
 
 // ---------------------------------------------------------------------------
+// Turn timer — host opt-in. When the deadline passes, the turn auto-skips
+// to the next player (the hint passes along, same as a manual skip).
+// Deadlines persist with the room; the setTimeout handles live in this Map.
+// ---------------------------------------------------------------------------
+
+const turnTimers = new Map(); // room code → Timeout
+
+function setTurnDeadline(room) {
+  room.turnDeadline = room.timerSecs ? Date.now() + room.timerSecs * 1000 : null;
+  armTurnTimer(room);
+}
+
+function clearTurnDeadline(room) {
+  room.turnDeadline = null;
+  const t = turnTimers.get(room.code);
+  if (t) { clearTimeout(t); turnTimers.delete(room.code); }
+}
+
+function armTurnTimer(room) {
+  const t = turnTimers.get(room.code);
+  if (t) clearTimeout(t);
+  if (!room.turnDeadline) return;
+  turnTimers.set(room.code, setTimeout(() => {
+    turnTimers.delete(room.code);
+    autoSkipTurn(room);
+  }, Math.max(0, room.turnDeadline - Date.now())));
+}
+
+function autoSkipTurn(room) {
+  if (!rooms.has(room.code) || room.status !== 'playing' || !room.turnDeadline) return;
+  if (room.turnDeadline > Date.now() + 500) return armTurnTimer(room); // deadline moved
+  const skipped = findPlayer(room, activeToken(room));
+  room.orderPos = (room.orderPos + 1) % room.order.length;
+  setTurnDeadline(room); // fresh clock for the next player
+  save();
+  broadcast(room);
+  sendTurnToActivePlayer(room);
+  if (skipped) {
+    io.to(room.code).emit('error_msg', `⏰ ${skipped.name} ran out of time — passing the turn!`);
+  }
+}
+
+// ---------------------------------------------------------------------------
 // Game flow
 // ---------------------------------------------------------------------------
 
@@ -293,6 +382,7 @@ async function prepareTurn(room) {
   if (room.turnIndex === 0) {
     room.status = 'playing';
     room.currentHint = null;
+    setTurnDeadline(room);
     save();
     broadcast(room);
     sendTurnToActivePlayer(room);
@@ -326,6 +416,7 @@ async function prepareTurn(room) {
 
   room.currentHint = hint;
   room.status = 'playing';
+  setTurnDeadline(room); // the clock starts when the player gets their hint
   save();
   broadcast(room);
   sendTurnToActivePlayer(room);
@@ -333,6 +424,7 @@ async function prepareTurn(room) {
 
 async function finishStory(room) {
   room.status = 'titling';
+  clearTurnDeadline(room);
   save();
   broadcast(room);
 
@@ -348,6 +440,7 @@ async function finishStory(room) {
 
   room.title = title;
   room.status = 'reveal';
+  archiveStory(room);
   save();
   broadcast(room);
   io.to(room.code).emit('reveal', revealPayload(room));
@@ -358,6 +451,12 @@ function resumePendingWork() {
   for (const room of rooms.values()) {
     if (room.status === 'thinking') prepareTurn(room);
     else if (room.status === 'titling') finishStory(room);
+    else if (room.status === 'playing' && room.turnDeadline) {
+      // Give the active player a grace window after a restart instead of
+      // skipping them the instant the server comes back.
+      room.turnDeadline = Math.max(room.turnDeadline, Date.now() + 30 * 1000);
+      armTurnTimer(room);
+    }
   }
 }
 
@@ -394,6 +493,8 @@ io.on('connection', socket => {
       currentHint: null,
       title: null,
       lastActivity: Date.now(),
+      timerSecs: 0,
+      turnDeadline: null,
     };
     rooms.set(room.code, room);
     attach(room, token);
@@ -454,13 +555,14 @@ io.on('connection', socket => {
     cb(view);
   });
 
-  socket.on('start_game', ({ turns }) => {
+  socket.on('start_game', ({ turns, timerSecs }) => {
     const room = getRoom();
     if (!room || !isHost(room) || room.status !== 'lobby') return;
     if (room.players.length < 2) {
       return socket.emit('error_msg', 'You need at least 2 players.');
     }
     room.turnsTotal = Math.min(30, Math.max(2, parseInt(turns, 10) || DEFAULT_TURNS));
+    room.timerSecs = [0, 60, 90, 120].includes(+timerSecs) ? +timerSecs : 0;
     room.turnIndex = 0;
     room.contributions = [];
     room.title = null;
@@ -488,6 +590,7 @@ io.on('connection', socket => {
     });
     room.turnIndex++;
     room.orderPos = (room.orderPos + 1) % room.order.length;
+    clearTurnDeadline(room); // prepareTurn starts a fresh clock with the hint
 
     if (room.turnIndex >= room.turnsTotal) finishStory(room);
     else prepareTurn(room);
@@ -499,6 +602,7 @@ io.on('connection', socket => {
     const room = getRoom();
     if (!room || !isHost(room) || room.status !== 'playing') return;
     room.orderPos = (room.orderPos + 1) % room.order.length;
+    setTurnDeadline(room); // fresh clock for the next player
     save();
     broadcast(room);
     sendTurnToActivePlayer(room);
@@ -519,6 +623,7 @@ io.on('connection', socket => {
   socket.on('new_game', () => {
     const room = getRoom();
     if (!room || !isHost(room) || room.status !== 'reveal') return;
+    clearTurnDeadline(room);
     Object.assign(room, {
       status: 'lobby', turnIndex: 0, order: [], orderPos: 0,
       contributions: [], currentHint: null, title: null,
@@ -646,8 +751,12 @@ io.on('connection', socket => {
     else room.players[idx].connected = false;
     socket.leave(room.code);
     socket.data.code = socket.data.token = undefined;
-    if (room.players.length === 0) rooms.delete(room.code);
-    else broadcast(room);
+    if (room.players.length === 0) {
+      clearTurnDeadline(room);
+      rooms.delete(room.code);
+    } else {
+      broadcast(room);
+    }
     save();
   });
 
@@ -667,6 +776,7 @@ io.on('connection', socket => {
 // ---------------------------------------------------------------------------
 
 load();
+loadStories();
 sweepStaleRooms();
 setInterval(sweepStaleRooms, SWEEP_INTERVAL);
 server.listen(PORT, () => {

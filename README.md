@@ -28,7 +28,7 @@ players can join mid-game, and disconnects/rejoins are seamless.
 
 | Thing | Why | Get it |
 |---|---|---|
-| **Node.js 18+** | Runs the game server | [nodejs.org](https://nodejs.org) |
+| **Node.js 16+** | Runs the game server | [nodejs.org](https://nodejs.org) |
 | **Claude Code CLI, logged in** | Generates the hints and titles (uses your Claude subscription — **no API keys needed**) | `npm install -g @anthropic-ai/claude-code`, then run `claude` once and log in |
 
 That's it. No database, no external services. All game state lives in memory

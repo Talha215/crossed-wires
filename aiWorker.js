@@ -75,7 +75,9 @@ ${storySoFar}
 }
 
 function generateTitle(fullStory) {
-  return runClaude(`Invent one ridiculous, funny title for this story. Output only the title, nothing else.\n\n"""\n${fullStory}\n"""`);
+  return runClaude(`Invent one ridiculous, funny title for this story. Output only the title - plain text, no quotation marks, no markdown.\n\n"""\n${fullStory}\n"""`)
+    // belt and suspenders: strip stray markdown/quote wrappers
+    .then(t => t.replace(/^[\s"*#'_]+/, '').replace(/[\s"*'_]+$/, ''));
 }
 
 module.exports = { generateHint, generateTitle };

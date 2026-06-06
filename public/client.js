@@ -68,6 +68,97 @@ function playJoinSound() {
 }
 
 // ---------------------------------------------------------------------------
+// Turn alerts — players are usually tabbed into Discord when their turn
+// arrives. Chime + flashing tab title always; browser notifications are
+// opt-in via the bell button (they reach a fully hidden tab).
+// ---------------------------------------------------------------------------
+
+const NOTIFY_KEY = 'crossed-wires-notify';
+const BASE_TITLE = document.title;
+let notifyPref = localStorage.getItem(NOTIFY_KEY) === '1';
+let titleFlashTimer = null;
+let lastAlertedTurn = -1; // alert once per turn, not on every re-render
+
+// Three rising notes (E5 → G5 → C6) — unmissable next to the join ding.
+function playTurnChime() {
+  if (!audioCtx || audioCtx.state !== 'running') return;
+  const t = audioCtx.currentTime;
+  for (const [freq, dt] of [[659.25, 0], [783.99, 0.12], [1046.5, 0.24]]) {
+    const osc = audioCtx.createOscillator();
+    const gain = audioCtx.createGain();
+    osc.type = 'triangle';
+    osc.frequency.value = freq;
+    gain.gain.setValueAtTime(0.0001, t + dt);
+    gain.gain.exponentialRampToValueAtTime(0.3, t + dt + 0.02);
+    gain.gain.exponentialRampToValueAtTime(0.0001, t + dt + 0.4);
+    osc.connect(gain).connect(audioCtx.destination);
+    osc.start(t + dt);
+    osc.stop(t + dt + 0.45);
+  }
+}
+
+function startTitleFlash() {
+  if (titleFlashTimer) return;
+  let on = false;
+  titleFlashTimer = setInterval(() => {
+    on = !on;
+    document.title = on ? '🔔 YOUR TURN!' : BASE_TITLE;
+  }, 900);
+}
+
+function stopTitleFlash() {
+  if (!titleFlashTimer) return;
+  clearInterval(titleFlashTimer);
+  titleFlashTimer = null;
+  document.title = BASE_TITLE;
+}
+
+// Coming back to the tab acknowledges the alert.
+document.addEventListener('visibilitychange', () => {
+  if (!document.hidden) stopTitleFlash();
+});
+
+function fireTurnAlert() {
+  playTurnChime();
+  if (document.hidden) {
+    startTitleFlash();
+    if (notifyPref && 'Notification' in window && Notification.permission === 'granted') {
+      const n = new Notification('Crossed Wires', { body: "It's your turn to write!" });
+      n.onclick = () => { window.focus(); n.close(); };
+    }
+  }
+}
+
+function updateNotifyButton() {
+  const btn = $('btn-notify');
+  if (!('Notification' in window)) return; // stays hidden (e.g. iOS Safari)
+  btn.hidden = false;
+  const active = notifyPref && Notification.permission === 'granted';
+  btn.textContent = active ? '🔔' : '🔕';
+  btn.title = active
+    ? 'Turn notifications are on'
+    : "Notify me when it's my turn";
+}
+
+$('btn-notify').addEventListener('click', async () => {
+  if (notifyPref && Notification.permission === 'granted') {
+    notifyPref = false;
+    toast('Turn notifications off.');
+  } else {
+    const perm = await Notification.requestPermission();
+    if (perm === 'granted') {
+      notifyPref = true;
+      toast("You'll get a notification when it's your turn.");
+    } else {
+      notifyPref = false;
+      toast('Notifications are blocked in your browser settings.');
+    }
+  }
+  localStorage.setItem(NOTIFY_KEY, notifyPref ? '1' : '0');
+  updateNotifyButton();
+});
+
+// ---------------------------------------------------------------------------
 // Background music — a procedural lo-fi loop, synthesized live.
 // Four-chord progression with soft pads, a gentle bass, and sparse plucks.
 // ---------------------------------------------------------------------------
@@ -450,6 +541,8 @@ function render() {
 
 function renderLobby() {
   show('lobby');
+  lastAlertedTurn = -1; // fresh game, fresh alerts
+  stopTitleFlash();
   $('lobby-code').textContent = summary.code;
 
   const list = $('lobby-players');
@@ -479,8 +572,9 @@ function renderLobby() {
 
 function renderGame() {
   show('game');
-  $('turn-counter').textContent =
+  $('turn-label').textContent =
     `Turn ${Math.min(summary.turnIndex + 1, summary.turnsTotal)} of ${summary.turnsTotal}`;
+  updateCountdown();
 
   const amActive = !!(me() && me().isActive);
   const isMyTurn = summary.status === 'playing' &&
@@ -515,6 +609,17 @@ function renderGame() {
   $('game-host-controls').hidden = !host || summary.status !== 'playing';
   $('btn-skip').hidden = !!isMyTurn; // can't skip yourself mid-write, just submit
 
+  // Alert the player the moment their turn begins (including the get-ready
+  // phase while their hint generates) — once per turn.
+  if (isMyTurn || hintPending) {
+    if (lastAlertedTurn !== summary.turnIndex) {
+      lastAlertedTurn = summary.turnIndex;
+      fireTurnAlert();
+    }
+  } else {
+    stopTitleFlash(); // turn passed (e.g. skipped) while we were away
+  }
+
   const showDoodle = !(isMyTurn || hintPending);
   // Your turn arrived mid-stroke: commit the ink drawn so far instead of
   // letting stray pointer events corrupt it while the canvas is hidden.
@@ -528,6 +633,7 @@ function renderGame() {
 
 function renderReveal() {
   show('reveal');
+  stopTitleFlash();
   $('reveal-title').textContent = revealData.title;
 
   const story = $('reveal-story');
@@ -687,8 +793,26 @@ $('lobby-code').addEventListener('click', async () => {
 });
 
 $('btn-start').addEventListener('click', () => {
-  socket.emit('start_game', { turns: $('turns-input').value });
+  socket.emit('start_game', {
+    turns: $('turns-input').value,
+    timerSecs: $('timer-input').value,
+  });
 });
+
+// Live countdown when the host enabled a turn timer. The server enforces
+// the deadline; this is purely display.
+function updateCountdown() {
+  const el = $('turn-timer');
+  if (!summary || summary.status !== 'playing' || !summary.turnDeadline) {
+    el.textContent = '';
+    el.classList.remove('urgent');
+    return;
+  }
+  const s = Math.max(0, Math.ceil((summary.turnDeadline - Date.now()) / 1000));
+  el.textContent = ` · ⏳ ${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`;
+  el.classList.toggle('urgent', s <= 10);
+}
+setInterval(updateCountdown, 500);
 
 function leave() {
   socket.emit('leave_room');
@@ -784,4 +908,5 @@ $('btn-new-game').addEventListener('click', () => socket.emit('new_game'));
 
 $('music-volume').value = musicPrefs.vol;
 applyMusicVolume();
+updateNotifyButton();
 render();

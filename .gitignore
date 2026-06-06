@@ -3,6 +3,7 @@ node_modules/
 
 # Runtime state — live game data, not source
 game-state.json
+stories.json
 
 # Local tool config
 .claude/settings.local.json
