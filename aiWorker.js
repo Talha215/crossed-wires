@@ -58,8 +58,8 @@ You are given the full story so far. The next player will write the next 1-3 sen
 Story position: turn ${turnIndex + 1} of ${turnsTotal}. ${beat}
 ${theme ? `The story's theme: ${theme}. Keep your hint and the mandatory element leaning into that flavor.\n` : ''}
 Write a hint (2-3 sentences) that:
+- HARD RULE, never break it: do not use ANY proper noun from the story — no character names, no place names, no organization names. Refer to people and things only obliquely ("someone", "a companion", "the building", "what they found"). The comedy of this game depends on the next writer inventing their own names and details. NEVER quote the story.
 - Conveys the story's momentum and tone — where things seem to be heading, and the energy level.
-- Hides the specifics: never name the story's characters, objects, or exact events. Refer to them obliquely or not at all. NEVER quote the story.
 - Pushes the story FORWARD. If the recent contributions are all reactions to one event in one place, your hint must move things along: suggest time has passed, the scene has changed, or a new development has begun.
 
 Then end with exactly one line starting with "Must include:" naming ONE mandatory element the player must work in. ${mustInclude}

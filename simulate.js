@@ -60,7 +60,8 @@ The game master's hint:
 ${hint}
 """
 
-Write your 1-3 sentence contribution in your persona's voice. Obey the hint's "Must include" requirement. Stay under 400 characters. Output ONLY your sentences — no preamble, no quotes.`;
+Write your contribution in your persona's voice: 1-3 SHORT sentences, under 350 characters total. Obey the hint's "Must include" requirement.
+CRITICAL: output ONLY the story sentences themselves. No preamble, no planning, no commentary about what you are going to write, no quotes around it.`;
 }
 
 function votePrompt(persona, contributions, ownIndexes) {
@@ -103,7 +104,13 @@ async function playGame(cfg, gameNo) {
     sock.on('your_turn', async t => {
       try {
         let text = await ask(writePrompt(persona, themeLabel, t.turnIndex + 1, t.turnsTotal, t.prompt));
-        text = text.replace(/^["'\s]+|["'\s]+$/g, '').slice(0, 480);
+        text = text.replace(/^["'\s]+|["'\s]+$/g, '');
+        if (text.length > 480) {
+          // trim at the last full sentence that fits, never mid-word
+          const cut = text.slice(0, 480);
+          const end = Math.max(cut.lastIndexOf('.'), cut.lastIndexOf('!'), cut.lastIndexOf('?'));
+          text = end > 100 ? cut.slice(0, end + 1) : cut;
+        }
         log(`turn ${t.turnIndex + 1}/${t.turnsTotal} — ${persona.name}: ${text.slice(0, 70)}…`);
         sock.emit('submit_turn', { text });
       } catch (e) {
