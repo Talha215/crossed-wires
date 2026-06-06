@@ -128,9 +128,8 @@ button.ghost.danger { color: var(--bad); border-color: #5c2c3a; }
 #btn-leave-lobby { width: 100%; margin-top: 14px; }
 
 /* ---- game ---- */
-.turn-counter { text-align: center; color: var(--muted); margin-bottom: 18px; letter-spacing: 0.05em; }
-.big-emoji { font-size: 3.5rem; text-align: center; margin: 16px 0 8px; }
-.waiting-text { text-align: center; font-size: 1.2rem; margin: 0 0 6px; }
+.turn-counter { text-align: center; color: var(--muted); margin-bottom: 12px; letter-spacing: 0.05em; }
+.waiting-text { text-align: center; font-size: 1.15rem; margin: 0 0 6px; }
 #game-waiting .muted { text-align: center; }
 
 .your-turn-banner {
@@ -155,7 +154,14 @@ button.ghost.danger { color: var(--bad); border-color: #5c2c3a; }
 .host-row button { flex: 1; }
 
 /* ---- communal doodle canvas ---- */
-.doodle-area { margin-top: 26px; }
+/* Waiting screens go wide so the canvas can be as big as the viewport allows
+   (the JS sizes it to the largest 4:3 box that fits). */
+body.doodle-wide #app { max-width: 1320px; }
+body.doodle-wide .waiting-text { margin-top: 0; }
+body.doodle-wide .host-row { max-width: 640px; margin-left: auto; margin-right: auto; }
+.doodle-area { margin-top: 14px; }
+#doodle-canvas { margin: 0 auto; }
+.doodle-tools { max-width: 640px; margin-left: auto; margin-right: auto; }
 .doodle-label { text-align: center; }
 .color-chip {
   display: inline-block;

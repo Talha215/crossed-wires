@@ -141,6 +141,63 @@ function publicStrokes(room) {
   return room.canvas.strokes.map(({ token, ...s }) => s);
 }
 
+const round3 = v => Math.round(v * 1000) / 1000;
+
+function distToSeg(px, py, ax, ay, bx, by) {
+  const dx = bx - ax, dy = by - ay;
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((px - ax) * dx + (py - ay) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(ax + t * dx - px, ay + t * dy - py);
+}
+
+function nearStroke(stroke, x, y, r) {
+  const pts = stroke.points;
+  if (pts.length === 1) return Math.hypot(pts[0][0] - x, pts[0][1] - y) <= r;
+  for (let i = 1; i < pts.length; i++) {
+    if (distToSeg(x, y, pts[i - 1][0], pts[i - 1][1], pts[i][0], pts[i][1]) <= r) return true;
+  }
+  return false;
+}
+
+/**
+ * Rub out the part of a stroke near (x, y) like a real eraser: resample the
+ * line (fast flicks leave big gaps between recorded points), drop everything
+ * inside the eraser radius, and return the surviving pieces.
+ */
+function eraseFromStroke(points, x, y, r) {
+  if (points.length === 1) return []; // a dot inside the radius just disappears
+
+  const step = 0.006;
+  const resampled = [points[0]];
+  for (let i = 1; i < points.length; i++) {
+    const [ax, ay] = points[i - 1], [bx, by] = points[i];
+    const n = Math.min(40, Math.floor(Math.hypot(bx - ax, by - ay) / step));
+    if (n <= 1) { resampled.push(points[i]); continue; }
+    for (let k = 1; k <= n; k++) {
+      resampled.push([round3(ax + ((bx - ax) * k) / n), round3(ay + ((by - ay) * k) / n)]);
+    }
+  }
+
+  const fragments = [];
+  let run = [];
+  for (const pt of resampled) {
+    if (Math.hypot(pt[0] - x, pt[1] - y) <= r) {
+      if (run.length >= 2) fragments.push(run);
+      run = [];
+    } else {
+      run.push(pt);
+    }
+  }
+  if (run.length >= 2) fragments.push(run);
+
+  // keep fragments under the point cap by thinning, never by cutting
+  return fragments.map(f => {
+    while (f.length > MAX_STROKE_POINTS) f = f.filter((_, i) => i % 2 === 0);
+    return f;
+  });
+}
+
 /** Public view of a room. Contains NO story text, hints, or title. */
 function roomSummary(room) {
   const active = room.status === 'playing' || room.status === 'thinking'
@@ -444,10 +501,18 @@ io.on('connection', socket => {
       return socket.emit('error_msg', 'The doodle canvas is full!');
     }
 
-    const round3 = v => Math.round(v * 1000) / 1000;
-    const pts = points.slice(0, MAX_STROKE_POINTS)
-      .map(p => (Array.isArray(p) ? [round3(+p[0]), round3(+p[1])] : null))
-      .filter(p => p && p.every(v => Number.isFinite(v) && v >= -0.05 && v <= 1.05));
+    // Truncate at the first invalid point rather than filtering it out —
+    // filtering would stitch the points around a glitch into a phantom
+    // straight line the player never drew.
+    // NB: typeof check matters — Infinity from a glitched client serializes
+    // to null over JSON, and +null would silently coerce to 0 (the corner!).
+    const pts = [];
+    for (const p of points.slice(0, MAX_STROKE_POINTS)) {
+      if (!Array.isArray(p) || typeof p[0] !== 'number' || typeof p[1] !== 'number') break;
+      const x = round3(p[0]), y = round3(p[1]);
+      if (![x, y].every(v => Number.isFinite(v) && v >= -0.05 && v <= 1.05)) break;
+      pts.push([x, y]);
+    }
     if (!pts.length) return;
 
     const stroke = {
@@ -465,14 +530,30 @@ io.on('connection', socket => {
     io.to(room.code).emit('stroke_added', pub);
   });
 
-  socket.on('erase_stroke', ({ id }) => {
+  // Real-eraser semantics: rub out only the area under the cursor. Affected
+  // strokes are split into surviving fragments. Own ink only, enforced here.
+  socket.on('erase_at', ({ x, y, r }) => {
     const room = getRoom();
-    if (!room) return;
-    const stroke = room.canvas.strokes.find(s => s.id === id);
-    if (!stroke || stroke.token !== socket.data.token) return; // own ink only
-    room.canvas.strokes = room.canvas.strokes.filter(s => s.id !== id);
+    if (!room || !['playing', 'thinking', 'titling'].includes(room.status)) return;
+    x = +x; y = +y;
+    if (!Number.isFinite(x) || !Number.isFinite(y)) return;
+    r = Math.min(0.06, Math.max(0.01, +r || 0.025));
+
+    const hit = room.canvas.strokes.filter(s =>
+      s.token === socket.data.token && nearStroke(s, x, y, r));
+    if (!hit.length) return;
+
+    for (const stroke of hit) {
+      room.canvas.strokes = room.canvas.strokes.filter(s => s.id !== stroke.id);
+      io.to(room.code).emit('stroke_removed', { id: stroke.id });
+      for (const pts of eraseFromStroke(stroke.points, x, y, r)) {
+        const frag = { ...stroke, id: room.canvas.nextId++, points: pts };
+        room.canvas.strokes.push(frag);
+        const { token, ...pub } = frag;
+        io.to(room.code).emit('stroke_added', pub);
+      }
+    }
     saveSoon();
-    io.to(room.code).emit('stroke_removed', { id });
   });
 
   socket.on('clear_my_strokes', () => {

@@ -187,6 +187,8 @@ let drawMode = 'draw';    // 'draw' | 'erase'
 const dCanvas = $('doodle-canvas');
 const dCtx = dCanvas.getContext('2d');
 const STROKE_WIDTH = 0.006;
+const ERASE_R = 0.03;     // eraser radius (normalized)
+let erasePos = null;      // eraser ring position while in erase mode
 
 function myColor() {
   const p = summary && session && summary.players.find(p => p.name === session.name);
@@ -217,13 +219,26 @@ function redrawDoodle() {
     strokePath(dCtx, s, dCanvas.width, dCanvas.height);
   }
   if (currentStroke) strokePath(dCtx, currentStroke, dCanvas.width, dCanvas.height);
+  if (drawMode === 'erase' && erasePos) { // eraser ring cursor
+    dCtx.strokeStyle = 'rgba(255, 255, 255, 0.7)';
+    dCtx.lineWidth = 1.5;
+    dCtx.beginPath();
+    dCtx.arc(erasePos[0] * dCanvas.width, erasePos[1] * dCanvas.height,
+      ERASE_R * dCanvas.width, 0, Math.PI * 2);
+    dCtx.stroke();
+  }
 }
 
+// Size the canvas to the largest 4:3 box that fits the viewport. A fixed
+// aspect ratio keeps the picture identical on every device — a full-bleed
+// canvas would stretch everyone's drawings differently.
 function sizeDoodle() {
-  const w = dCanvas.clientWidth;
-  if (!w) return; // not visible right now
+  if (!dCanvas.offsetParent) return; // not visible right now
+  const avail = Math.max(260, window.innerHeight - dCanvas.getBoundingClientRect().top - 86);
+  const cssW = Math.min(dCanvas.parentElement.clientWidth, avail * (4 / 3));
+  dCanvas.style.width = cssW + 'px';
   const dpr = window.devicePixelRatio || 1;
-  const pxW = Math.round(w * dpr);
+  const pxW = Math.round(dCanvas.clientWidth * dpr);
   if (dCanvas.width !== pxW) {
     dCanvas.width = pxW;
     dCanvas.height = Math.round(dCanvas.clientHeight * dpr);
@@ -232,51 +247,49 @@ function sizeDoodle() {
 }
 window.addEventListener('resize', sizeDoodle);
 
+// Returns normalized [x, y], clamped to the canvas; null if the canvas has
+// no size (e.g. a pointer event straggling in after the screen switched).
 function evtPos(e) {
   const r = dCanvas.getBoundingClientRect();
-  return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+  if (!r.width || !r.height) return null;
+  return [
+    Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)),
+    Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)),
+  ];
 }
 
-function distToSeg(p, a, b) {
-  const dx = b[0] - a[0], dy = b[1] - a[1];
-  const len2 = dx * dx + dy * dy;
-  let t = len2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
-  t = Math.max(0, Math.min(1, t));
-  return Math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1]);
-}
-
-// Erase any of MY strokes near this point (the server enforces ownership too).
-function eraseAt(p) {
-  let erased = false;
-  for (const s of [...canvasStrokes]) {
-    if (!session || s.name !== session.name) continue;
-    const r = Math.max(s.width * 2, 0.018);
-    const hit = s.points.length === 1
-      ? Math.hypot(s.points[0][0] - p[0], s.points[0][1] - p[1]) < r
-      : s.points.some((pt, i) => i > 0 && distToSeg(p, s.points[i - 1], pt) < r);
-    if (hit) {
-      socket.emit('erase_stroke', { id: s.id });
-      canvasStrokes = canvasStrokes.filter(x => x.id !== s.id); // optimistic
-      erased = true;
-    }
-  }
-  if (erased) redrawDoodle();
+let lastEraseSent = 0;
+function sendErase(p) {
+  if (performance.now() - lastEraseSent < 25) return; // ~40Hz cap
+  lastEraseSent = performance.now();
+  socket.emit('erase_at', { x: p[0], y: p[1], r: ERASE_R });
 }
 
 dCanvas.addEventListener('pointerdown', e => {
   e.preventDefault();
   dCanvas.setPointerCapture(e.pointerId);
   const p = evtPos(e);
-  if (drawMode === 'erase') return eraseAt(p);
+  if (!p) return;
+  if (drawMode === 'erase') {
+    erasePos = p;
+    sendErase(p);
+    redrawDoodle();
+    return;
+  }
   currentStroke = { color: myColor(), width: STROKE_WIDTH, points: [p] };
   redrawDoodle();
 });
 
 dCanvas.addEventListener('pointermove', e => {
-  if (!e.buttons) return;
   const p = evtPos(e);
-  if (drawMode === 'erase') return eraseAt(p);
-  if (!currentStroke) return;
+  if (!p) return;
+  if (drawMode === 'erase') {
+    erasePos = p;
+    if (e.buttons) sendErase(p);
+    redrawDoodle(); // keeps the ring under the cursor
+    return;
+  }
+  if (!e.buttons || !currentStroke) return;
   const last = currentStroke.points[currentStroke.points.length - 1];
   if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.004) return;
   currentStroke.points.push(p);
@@ -290,6 +303,8 @@ dCanvas.addEventListener('pointermove', e => {
   dCtx.lineTo(p[0] * W, p[1] * H);
   dCtx.stroke();
 });
+
+dCanvas.addEventListener('pointerleave', () => { erasePos = null; redrawDoodle(); });
 
 function finishStroke() {
   if (!currentStroke) return;
@@ -342,6 +357,7 @@ function show(name) {
   for (const s of screens) $(`screen-${s}`).hidden = s !== name;
   // The reveal gets a wider layout so hints fit in a side column on desktop.
   document.body.classList.toggle('reveal-wide', name === 'reveal');
+  if (name !== 'game') document.body.classList.remove('doodle-wide');
 }
 
 function toast(msg) {
@@ -425,24 +441,25 @@ function renderGame() {
   } else if (hintPending) {
     $('prompt-box').textContent = '🤖 The AI is writing your secret hint — get ready…';
   } else if (summary.status === 'thinking') {
-    $('waiting-emoji').textContent = '🤖';
-    $('waiting-text').textContent = `The AI is whispering a hint to ${summary.activeName}…`;
+    $('waiting-text').textContent = `🤖 The AI is whispering a hint to ${summary.activeName}…`;
   } else if (summary.status === 'titling') {
-    $('waiting-emoji').textContent = '🎬';
-    $('waiting-text').textContent = 'The story is done! Coming up with a title…';
+    $('waiting-text').textContent = '🎬 The story is done! Coming up with a title…';
   } else if (summary.activeName) {
-    $('waiting-emoji').textContent = '✍️';
-    $('waiting-text').textContent = `${summary.activeName} is writing…`;
+    $('waiting-text').textContent = `✍️ ${summary.activeName} is writing…`;
   } else {
-    $('waiting-emoji').textContent = '🎬';
-    $('waiting-text').textContent = 'Getting the reveal ready…';
+    $('waiting-text').textContent = '🎬 Getting the reveal ready…';
   }
 
   const host = !!(me() && me().isHost);
   $('game-host-controls').hidden = !host || summary.status !== 'playing';
   $('btn-skip').hidden = !!isMyTurn; // can't skip yourself mid-write, just submit
 
-  if (!(isMyTurn || hintPending)) {
+  const showDoodle = !(isMyTurn || hintPending);
+  // Your turn arrived mid-stroke: commit the ink drawn so far instead of
+  // letting stray pointer events corrupt it while the canvas is hidden.
+  if (!showDoodle && currentStroke) finishStroke();
+  document.body.classList.toggle('doodle-wide', showDoodle);
+  if (showDoodle) {
     $('my-color').style.background = myColor();
     requestAnimationFrame(sizeDoodle); // canvas just became visible — size it
   }
