@@ -74,6 +74,9 @@ function archiveStory(room) {
 app.get('/stories', (req, res) =>
   res.sendFile(path.join(__dirname, 'public', 'stories.html')));
 
+app.get('/patch-notes', (req, res) =>
+  res.sendFile(path.join(__dirname, 'public', 'patch-notes.html')));
+
 app.get('/api/stories', (req, res) =>
   res.json(archive.map(({ id, title, finishedAt, players, contributions }) =>
     ({ id, title, finishedAt, players, turns: contributions.length }))));

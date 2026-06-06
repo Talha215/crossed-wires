@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Patch Notes — Crossed Wires</title>
+  <link rel="stylesheet" href="style.css">
+  <style>
+    .release {
+      background: var(--card);
+      border-radius: var(--radius);
+      padding: 16px 20px;
+      margin-top: 14px;
+    }
+    .release h2 {
+      margin: 0 0 2px;
+      font-size: 1.1rem;
+    }
+    .release .ver { color: var(--accent); margin-right: 8px; }
+    .release ul { margin: 10px 0 2px; padding-left: 22px; }
+    .release li { margin: 4px 0; }
+    .tagline a { color: var(--accent); }
+  </style>
+</head>
+<body>
+  <main id="app">
+    <h1 class="logo">🛠️ Patch Notes</h1>
+    <p class="tagline"><a href="/">← Back to the game</a></p>
+    <div id="releases"></div>
+  </main>
+
+  <script>
+    // Newest first. Keep bullets short — players skim this between games.
+    const RELEASES = [
+      {
+        ver: '1.5',
+        title: 'Party-proofing',
+        notes: [
+          '🔔 Turn alerts: chime + flashing tab when it\'s your turn, opt-in browser notifications via the bell button',
+          '📚 Story archive: finished stories are saved forever and browsable at /stories (host can delete)',
+          '⏳ Optional turn timer: host picks 60/90/120s, expired turns auto-skip',
+          'Old empty rooms clean themselves up; saves are crash-proof',
+          'Story titles no longer arrive wrapped in markdown',
+        ],
+      },
+      {
+        ver: '1.4',
+        title: 'Faster, smarter AI',
+        notes: [
+          '⚡ Hints now arrive in ~3 seconds (was 8–15)',
+          'Hints follow the story arc: complications early, escalation in the middle, consequences late',
+          '"Must include" is always a brand-new thing — no more endless reaction scenes',
+        ],
+      },
+      {
+        ver: '1.3',
+        title: 'Better reveals',
+        notes: [
+          'The story now reads as one flowing piece of prose',
+          'Hover or tap any passage to see who wrote it and the secret hint they saw',
+        ],
+      },
+      {
+        ver: '1.2',
+        title: 'The doodle canvas',
+        notes: [
+          '🎨 Draw together while you wait — strokes appear live as people draw',
+          'Everyone gets their own color; you can only erase your own ink',
+          'The eraser rubs out just what\'s under it, like a real eraser',
+          'Canvas sized to your screen; the masterpiece is unveiled with the story',
+          'Fixed the phantom line that snapped to the corner if your turn arrived mid-stroke',
+        ],
+      },
+      {
+        ver: '1.1',
+        title: 'Quality of life',
+        notes: [
+          'Players can join mid-game — they slot into the turn rotation (writing blind keeps it fair)',
+          'Skipped players keep their seat for the next round',
+          'Your-turn screen appears instantly while the AI writes your hint',
+          '🎵 Background music with volume + mute, and a ding when someone joins',
+          'Fixed: joining sometimes didn\'t show the lobby; host buttons showed for everyone',
+        ],
+      },
+      {
+        ver: '1.0',
+        title: 'Launch',
+        notes: [
+          'Telephone + mad libs: write a story blind, guided only by AI hints',
+          'Rooms with 4-letter codes; reveal with AI-generated title',
+          'Story text never reaches any player before the reveal — enforced server-side',
+          'Read aloud, download as markdown, instant rematch',
+          'Games survive refreshes, disconnects, and full server restarts',
+        ],
+      },
+    ];
+
+    const container = document.getElementById('releases');
+    for (const r of RELEASES) {
+      const div = document.createElement('div');
+      div.className = 'release';
+      const h = document.createElement('h2');
+      const ver = document.createElement('span');
+      ver.className = 'ver';
+      ver.textContent = 'v' + r.ver;
+      h.append(ver, r.title);
+      const ul = document.createElement('ul');
+      for (const n of r.notes) {
+        const li = document.createElement('li');
+        li.textContent = n;
+        ul.append(li);
+      }
+      div.append(h, ul);
+      container.append(div);
+    }
+  </script>
+</body>
+</html>
