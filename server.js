@@ -59,6 +59,7 @@ app.use(express.static(path.join(__dirname, 'public')));
  *   order: [token, ...],          // turn rotation; late joiners are appended
  *   orderPos,                     // index into order of the active player
  *   canvas: { strokes: [{ id, token, name, color, width, points }], nextId },
+ *   lastActivity,                 // ms epoch; stale rooms get swept
  *   contributions: [{ token, name, text, hint }],      // hint = what they saw
  *   currentHint,                  // hint for the active player (null on turn 1)
  *   title,
@@ -94,6 +95,8 @@ function load() {
       // Migrate saves from before the doodle canvas existed.
       if (!room.canvas) room.canvas = { strokes: [], nextId: 1 };
       room.players.forEach(p => { if (!p.color) p.color = pickColor(room); });
+      // Pre-sweep saves have no timestamp — give them a fresh grace period.
+      if (!room.lastActivity) room.lastActivity = Date.now();
       rooms.set(room.code, room);
     }
     console.log(`Restored ${rooms.size} room(s) from ${path.basename(STATE_FILE)}`);
@@ -219,6 +222,7 @@ function roomSummary(room) {
 }
 
 function broadcast(room) {
+  touch(room); // every state change broadcasts, so this tracks liveness
   io.to(room.code).emit('room_update', roomSummary(room));
 }
 
@@ -249,6 +253,36 @@ function revealPayload(room) {
       hint: c.hint,
     })),
   };
+}
+
+// ---------------------------------------------------------------------------
+// Stale-room sweep — rooms never expire on their own, so without this the
+// state file becomes a graveyard of abandoned lobbies.
+// ---------------------------------------------------------------------------
+
+const SWEEP_INTERVAL = 10 * 60 * 1000;
+const REVEAL_TTL = 6 * 60 * 60 * 1000;  // finished games linger a few hours
+const IDLE_TTL = 24 * 60 * 60 * 1000;   // anything else gets a full day
+
+function touch(room) {
+  room.lastActivity = Date.now();
+}
+
+function sweepStaleRooms() {
+  const now = Date.now();
+  let removed = 0;
+  for (const room of [...rooms.values()]) {
+    if (room.players.some(p => p.connected)) continue; // someone's still here
+    const ttl = room.status === 'reveal' ? REVEAL_TTL : IDLE_TTL;
+    if (now - room.lastActivity > ttl) {
+      rooms.delete(room.code);
+      removed++;
+    }
+  }
+  if (removed) {
+    console.log(`Swept ${removed} stale room(s); ${rooms.size} remain`);
+    save();
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -355,6 +389,7 @@ io.on('connection', socket => {
       contributions: [],
       currentHint: null,
       title: null,
+      lastActivity: Date.now(),
     };
     rooms.set(room.code, room);
     attach(room, token);
@@ -524,6 +559,7 @@ io.on('connection', socket => {
       points: pts,
     };
     room.canvas.strokes.push(stroke);
+    touch(room); // doodling doesn't broadcast room_update, so track it here
     saveSoon();
     const { token, ...pub } = stroke;
     pub.tag = typeof tag === 'string' ? tag.slice(0, 16) : undefined;
@@ -553,6 +589,7 @@ io.on('connection', socket => {
         io.to(room.code).emit('stroke_added', pub);
       }
     }
+    touch(room);
     saveSoon();
   });
 
@@ -564,6 +601,7 @@ io.on('connection', socket => {
       .map(s => s.id);
     if (!ids.length) return;
     room.canvas.strokes = room.canvas.strokes.filter(s => s.token !== socket.data.token);
+    touch(room);
     saveSoon();
     io.to(room.code).emit('strokes_removed', { ids });
   });
@@ -598,6 +636,8 @@ io.on('connection', socket => {
 // ---------------------------------------------------------------------------
 
 load();
+sweepStaleRooms();
+setInterval(sweepStaleRooms, SWEEP_INTERVAL);
 server.listen(PORT, () => {
   console.log(`Crossed Wires running at http://localhost:${PORT}`);
   resumePendingWork();
