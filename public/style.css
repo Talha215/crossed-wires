@@ -129,7 +129,7 @@ button.ghost.danger { color: var(--bad); border-color: #5c2c3a; }
 
 /* ---- game ---- */
 .turn-counter { text-align: center; color: var(--muted); margin-bottom: 18px; letter-spacing: 0.05em; }
-.big-emoji { font-size: 3.5rem; text-align: center; margin: 36px 0 10px; }
+.big-emoji { font-size: 3.5rem; text-align: center; margin: 16px 0 8px; }
 .waiting-text { text-align: center; font-size: 1.2rem; margin: 0 0 6px; }
 #game-waiting .muted { text-align: center; }
 
@@ -153,6 +153,32 @@ button.ghost.danger { color: var(--bad); border-color: #5c2c3a; }
 
 .host-row { display: flex; gap: 10px; margin-top: 28px; }
 .host-row button { flex: 1; }
+
+/* ---- communal doodle canvas ---- */
+.doodle-area { margin-top: 26px; }
+.doodle-label { text-align: center; }
+.color-chip {
+  display: inline-block;
+  width: 0.9em;
+  height: 0.9em;
+  border-radius: 50%;
+  vertical-align: -0.1em;
+  background: var(--muted);
+}
+#doodle-canvas, #reveal-canvas {
+  display: block;
+  width: 100%;
+  aspect-ratio: 4 / 3;
+  border-radius: var(--radius);
+  background: #262238;
+  border: 1px solid var(--card-2);
+}
+#doodle-canvas { touch-action: none; cursor: crosshair; }
+.doodle-tools { display: flex; gap: 8px; margin-top: 10px; }
+.doodle-tools button { flex: 1; padding: 8px 10px; font-size: 0.95rem; }
+.doodle-tools .tool.active { outline: 2px solid var(--accent); }
+#reveal-doodle { margin: 0 0 18px; }
+#reveal-doodle p { text-align: center; margin-bottom: 8px; }
 
 /* ---- reveal ---- */
 .reveal-title { text-align: center; font-size: 1.7rem; margin: 6px 0 4px; }

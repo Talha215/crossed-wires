@@ -27,6 +27,14 @@ const STARTER_PROMPT =
   'You are starting the story! Write the opening 1–3 sentences. ' +
   'Set a scene, introduce someone or something — anything goes.';
 
+// Doodle canvas: bright colors that read well on the dark canvas background.
+const COLORS = [
+  '#ff6b6b', '#ffb454', '#ffe066', '#7ee08a', '#4ecdc4', '#76d7ea',
+  '#5da9ff', '#b39dff', '#ff8ad8', '#f4a261', '#a0e8af', '#e07be0',
+];
+const MAX_STROKES = 2000;
+const MAX_STROKE_POINTS = 600;
+
 const FALLBACK_HINT =
   'Something strange just happened in the story, and everyone involved is mildly alarmed.\n' +
   'Must include: a rubber chicken.';
@@ -47,9 +55,10 @@ app.use(express.static(path.join(__dirname, 'public')));
  *   code, hostToken,
  *   status: 'lobby' | 'playing' | 'thinking' | 'titling' | 'reveal',
  *   turnsTotal, turnIndex,
- *   players: [{ token, name, connected, socketId }],   // socketId not persisted
+ *   players: [{ token, name, color, connected, socketId }], // socketId not persisted
  *   order: [token, ...],          // turn rotation; late joiners are appended
  *   orderPos,                     // index into order of the active player
+ *   canvas: { strokes: [{ id, token, name, color, width, points }], nextId },
  *   contributions: [{ token, name, text, hint }],      // hint = what they saw
  *   currentHint,                  // hint for the active player (null on turn 1)
  *   title,
@@ -57,12 +66,20 @@ app.use(express.static(path.join(__dirname, 'public')));
  */
 const rooms = new Map();
 
+let saveTimer = null;
+
 function save() {
+  if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   const plain = [...rooms.values()].map(room => ({
     ...room,
     players: room.players.map(({ socketId, ...p }) => ({ ...p, connected: false })),
   }));
   fs.writeFileSync(STATE_FILE, JSON.stringify(plain, null, 2));
+}
+
+// Doodle strokes arrive far more often than game events — batch their writes.
+function saveSoon() {
+  if (!saveTimer) saveTimer = setTimeout(save, 1500);
 }
 
 function load() {
@@ -74,6 +91,9 @@ function load() {
       if (room.orderPos === undefined) {
         room.orderPos = room.order.length ? room.turnIndex % room.order.length : 0;
       }
+      // Migrate saves from before the doodle canvas existed.
+      if (!room.canvas) room.canvas = { strokes: [], nextId: 1 };
+      room.players.forEach(p => { if (!p.color) p.color = pickColor(room); });
       rooms.set(room.code, room);
     }
     console.log(`Restored ${rooms.size} room(s) from ${path.basename(STATE_FILE)}`);
@@ -109,6 +129,18 @@ function findPlayer(room, token) {
   return room.players.find(p => p.token === token);
 }
 
+function pickColor(room) {
+  const used = new Set(room.players.map(p => p.color));
+  const free = COLORS.filter(c => !used.has(c));
+  const pool = free.length ? free : COLORS;
+  return pool[crypto.randomInt(pool.length)];
+}
+
+/** Strokes as sent to clients — owner identified by public name, not token. */
+function publicStrokes(room) {
+  return room.canvas.strokes.map(({ token, ...s }) => s);
+}
+
 /** Public view of a room. Contains NO story text, hints, or title. */
 function roomSummary(room) {
   const active = room.status === 'playing' || room.status === 'thinking'
@@ -121,6 +153,7 @@ function roomSummary(room) {
     activeName: active ? active.name : null,
     players: room.players.map(p => ({
       name: p.name,
+      color: p.color,
       connected: p.connected,
       isHost: p.token === room.hostToken,
       isActive: active ? p.token === active.token : false,
@@ -258,9 +291,10 @@ io.on('connection', socket => {
       status: 'lobby',
       turnsTotal: DEFAULT_TURNS,
       turnIndex: 0,
-      players: [{ token, name, connected: true, socketId: socket.id }],
+      players: [{ token, name, color: COLORS[crypto.randomInt(COLORS.length)], connected: true, socketId: socket.id }],
       order: [],
       orderPos: 0,
+      canvas: { strokes: [], nextId: 1 },
       contributions: [],
       currentHint: null,
       title: null,
@@ -287,14 +321,14 @@ io.on('connection', socket => {
     while (room.players.some(p => p.name === finalName)) finalName = `${name} ${n++}`;
 
     const token = crypto.randomBytes(16).toString('hex');
-    room.players.push({ token, name: finalName, connected: true, socketId: socket.id });
+    room.players.push({ token, name: finalName, color: pickColor(room), connected: true, socketId: socket.id });
     // Mid-game joiners go to the back of the turn rotation. They write blind
     // like everyone else, so joining late is perfectly fair.
     if (room.status !== 'lobby') room.order.push(token);
     attach(room, token);
     save();
     broadcast(room);
-    cb({ ok: true, code: room.code, token, name: finalName });
+    cb({ ok: true, code: room.code, token, name: finalName, canvas: publicStrokes(room) });
   });
 
   // Reconnect after a page refresh, dropped connection, or server restart.
@@ -309,7 +343,12 @@ io.on('connection', socket => {
     save();
     broadcast(room);
 
-    const view = { ok: true, name: player.name, summary: roomSummary(room) };
+    const view = {
+      ok: true,
+      name: player.name,
+      summary: roomSummary(room),
+      canvas: publicStrokes(room),
+    };
     if (room.status === 'playing' && activeToken(room) === token) {
       view.yourTurn = turnPayload(room); // private — only this socket
     }
@@ -331,6 +370,8 @@ io.on('connection', socket => {
     room.title = null;
     room.order = room.players.map(p => p.token);
     room.orderPos = 0;
+    room.canvas = { strokes: [], nextId: 1 };
+    io.to(room.code).emit('canvas_state', []);
     prepareTurn(room);
   });
 
@@ -385,9 +426,65 @@ io.on('connection', socket => {
     Object.assign(room, {
       status: 'lobby', turnIndex: 0, order: [], orderPos: 0,
       contributions: [], currentHint: null, title: null,
+      canvas: { strokes: [], nextId: 1 },
     });
     save();
     broadcast(room);
+    io.to(room.code).emit('canvas_state', []);
+  });
+
+  // ---- communal doodle canvas (waiting screens) ----------------------------
+
+  socket.on('draw_stroke', ({ points, width, tag }) => {
+    const room = getRoom();
+    if (!room || !['playing', 'thinking', 'titling'].includes(room.status)) return;
+    const player = findPlayer(room, socket.data.token);
+    if (!player || !Array.isArray(points)) return;
+    if (room.canvas.strokes.length >= MAX_STROKES) {
+      return socket.emit('error_msg', 'The doodle canvas is full!');
+    }
+
+    const round3 = v => Math.round(v * 1000) / 1000;
+    const pts = points.slice(0, MAX_STROKE_POINTS)
+      .map(p => (Array.isArray(p) ? [round3(+p[0]), round3(+p[1])] : null))
+      .filter(p => p && p.every(v => Number.isFinite(v) && v >= -0.05 && v <= 1.05));
+    if (!pts.length) return;
+
+    const stroke = {
+      id: room.canvas.nextId++,
+      token: player.token,            // ownership — never sent to clients
+      name: player.name,
+      color: player.color,            // server-assigned; client can't spoof it
+      width: Math.min(0.02, Math.max(0.002, +width || 0.006)),
+      points: pts,
+    };
+    room.canvas.strokes.push(stroke);
+    saveSoon();
+    const { token, ...pub } = stroke;
+    pub.tag = typeof tag === 'string' ? tag.slice(0, 16) : undefined;
+    io.to(room.code).emit('stroke_added', pub);
+  });
+
+  socket.on('erase_stroke', ({ id }) => {
+    const room = getRoom();
+    if (!room) return;
+    const stroke = room.canvas.strokes.find(s => s.id === id);
+    if (!stroke || stroke.token !== socket.data.token) return; // own ink only
+    room.canvas.strokes = room.canvas.strokes.filter(s => s.id !== id);
+    saveSoon();
+    io.to(room.code).emit('stroke_removed', { id });
+  });
+
+  socket.on('clear_my_strokes', () => {
+    const room = getRoom();
+    if (!room) return;
+    const ids = room.canvas.strokes
+      .filter(s => s.token === socket.data.token)
+      .map(s => s.id);
+    if (!ids.length) return;
+    room.canvas.strokes = room.canvas.strokes.filter(s => s.token !== socket.data.token);
+    saveSoon();
+    io.to(room.code).emit('strokes_removed', { ids });
   });
 
   socket.on('leave_room', () => {

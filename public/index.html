@@ -59,6 +59,18 @@
         <div class="big-emoji" id="waiting-emoji">✍️</div>
         <p id="waiting-text" class="waiting-text"></p>
         <p class="muted">No peeking — the story stays secret until the end.</p>
+
+        <div class="doodle-area">
+          <p class="muted small doodle-label">
+            Doodle together while you wait — your color is <span id="my-color" class="color-chip"></span>
+          </p>
+          <canvas id="doodle-canvas"></canvas>
+          <div class="doodle-tools">
+            <button id="btn-tool-draw" class="tool active">✏️ Draw</button>
+            <button id="btn-tool-erase" class="tool">🧽 Erase</button>
+            <button id="btn-clear-mine" class="ghost">🗑️ Clear my ink</button>
+          </div>
+        </div>
       </div>
 
       <!-- your turn -->
@@ -93,6 +105,11 @@
             <div id="hint-text" class="hint-text"></div>
           </div>
         </aside>
+      </div>
+
+      <div id="reveal-doodle" hidden>
+        <p class="muted small">…and the masterpiece you doodled while waiting:</p>
+        <canvas id="reveal-canvas"></canvas>
       </div>
 
       <div class="reveal-actions">

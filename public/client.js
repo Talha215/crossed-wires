@@ -174,6 +174,167 @@ $('music-volume').addEventListener('input', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Communal doodle canvas — shown on waiting screens, synced through the
+// server. Coordinates are normalized to [0,1] so every device sees the same
+// picture regardless of screen size (the canvas keeps a fixed 4:3 ratio).
+// ---------------------------------------------------------------------------
+
+let canvasStrokes = [];   // authoritative strokes from the server
+let pendingStrokes = [];  // sent, awaiting the server's echo
+let currentStroke = null; // being drawn right now
+let drawMode = 'draw';    // 'draw' | 'erase'
+
+const dCanvas = $('doodle-canvas');
+const dCtx = dCanvas.getContext('2d');
+const STROKE_WIDTH = 0.006;
+
+function myColor() {
+  const p = summary && session && summary.players.find(p => p.name === session.name);
+  return (p && p.color) || '#aaa';
+}
+
+function strokePath(ctx, s, W, H) {
+  const w = Math.max(1.5, s.width * W);
+  ctx.strokeStyle = ctx.fillStyle = s.color;
+  ctx.lineWidth = w;
+  ctx.lineCap = ctx.lineJoin = 'round';
+  const pts = s.points;
+  if (pts.length === 1) { // a single tap = a dot
+    ctx.beginPath();
+    ctx.arc(pts[0][0] * W, pts[0][1] * H, w / 2, 0, Math.PI * 2);
+    ctx.fill();
+    return;
+  }
+  ctx.beginPath();
+  ctx.moveTo(pts[0][0] * W, pts[0][1] * H);
+  for (let i = 1; i < pts.length; i++) ctx.lineTo(pts[i][0] * W, pts[i][1] * H);
+  ctx.stroke();
+}
+
+function redrawDoodle() {
+  dCtx.clearRect(0, 0, dCanvas.width, dCanvas.height);
+  for (const s of [...canvasStrokes, ...pendingStrokes]) {
+    strokePath(dCtx, s, dCanvas.width, dCanvas.height);
+  }
+  if (currentStroke) strokePath(dCtx, currentStroke, dCanvas.width, dCanvas.height);
+}
+
+function sizeDoodle() {
+  const w = dCanvas.clientWidth;
+  if (!w) return; // not visible right now
+  const dpr = window.devicePixelRatio || 1;
+  const pxW = Math.round(w * dpr);
+  if (dCanvas.width !== pxW) {
+    dCanvas.width = pxW;
+    dCanvas.height = Math.round(dCanvas.clientHeight * dpr);
+  }
+  redrawDoodle();
+}
+window.addEventListener('resize', sizeDoodle);
+
+function evtPos(e) {
+  const r = dCanvas.getBoundingClientRect();
+  return [(e.clientX - r.left) / r.width, (e.clientY - r.top) / r.height];
+}
+
+function distToSeg(p, a, b) {
+  const dx = b[0] - a[0], dy = b[1] - a[1];
+  const len2 = dx * dx + dy * dy;
+  let t = len2 ? ((p[0] - a[0]) * dx + (p[1] - a[1]) * dy) / len2 : 0;
+  t = Math.max(0, Math.min(1, t));
+  return Math.hypot(a[0] + t * dx - p[0], a[1] + t * dy - p[1]);
+}
+
+// Erase any of MY strokes near this point (the server enforces ownership too).
+function eraseAt(p) {
+  let erased = false;
+  for (const s of [...canvasStrokes]) {
+    if (!session || s.name !== session.name) continue;
+    const r = Math.max(s.width * 2, 0.018);
+    const hit = s.points.length === 1
+      ? Math.hypot(s.points[0][0] - p[0], s.points[0][1] - p[1]) < r
+      : s.points.some((pt, i) => i > 0 && distToSeg(p, s.points[i - 1], pt) < r);
+    if (hit) {
+      socket.emit('erase_stroke', { id: s.id });
+      canvasStrokes = canvasStrokes.filter(x => x.id !== s.id); // optimistic
+      erased = true;
+    }
+  }
+  if (erased) redrawDoodle();
+}
+
+dCanvas.addEventListener('pointerdown', e => {
+  e.preventDefault();
+  dCanvas.setPointerCapture(e.pointerId);
+  const p = evtPos(e);
+  if (drawMode === 'erase') return eraseAt(p);
+  currentStroke = { color: myColor(), width: STROKE_WIDTH, points: [p] };
+  redrawDoodle();
+});
+
+dCanvas.addEventListener('pointermove', e => {
+  if (!e.buttons) return;
+  const p = evtPos(e);
+  if (drawMode === 'erase') return eraseAt(p);
+  if (!currentStroke) return;
+  const last = currentStroke.points[currentStroke.points.length - 1];
+  if (Math.hypot(p[0] - last[0], p[1] - last[1]) < 0.004) return;
+  currentStroke.points.push(p);
+  // draw just the new segment — no full redraw per move
+  const W = dCanvas.width, H = dCanvas.height;
+  dCtx.strokeStyle = currentStroke.color;
+  dCtx.lineWidth = Math.max(1.5, currentStroke.width * W);
+  dCtx.lineCap = 'round';
+  dCtx.beginPath();
+  dCtx.moveTo(last[0] * W, last[1] * H);
+  dCtx.lineTo(p[0] * W, p[1] * H);
+  dCtx.stroke();
+});
+
+function finishStroke() {
+  if (!currentStroke) return;
+  const tag = Math.random().toString(36).slice(2, 10);
+  const stroke = { ...currentStroke, tag };
+  pendingStrokes.push(stroke); // keep it on screen until the server echoes it
+  socket.emit('draw_stroke', { points: stroke.points, width: stroke.width, tag });
+  currentStroke = null;
+}
+dCanvas.addEventListener('pointerup', finishStroke);
+dCanvas.addEventListener('pointercancel', finishStroke);
+
+socket.on('canvas_state', strokes => {
+  canvasStrokes = strokes;
+  pendingStrokes = [];
+  redrawDoodle();
+});
+
+socket.on('stroke_added', stroke => {
+  if (stroke.tag) pendingStrokes = pendingStrokes.filter(p => p.tag !== stroke.tag);
+  canvasStrokes.push(stroke);
+  strokePath(dCtx, stroke, dCanvas.width, dCanvas.height);
+});
+
+socket.on('stroke_removed', ({ id }) => {
+  canvasStrokes = canvasStrokes.filter(s => s.id !== id);
+  redrawDoodle();
+});
+
+socket.on('strokes_removed', ({ ids }) => {
+  const gone = new Set(ids);
+  canvasStrokes = canvasStrokes.filter(s => !gone.has(s.id));
+  redrawDoodle();
+});
+
+function setDrawMode(mode) {
+  drawMode = mode;
+  $('btn-tool-draw').classList.toggle('active', mode === 'draw');
+  $('btn-tool-erase').classList.toggle('active', mode === 'erase');
+}
+$('btn-tool-draw').addEventListener('click', () => setDrawMode('draw'));
+$('btn-tool-erase').addEventListener('click', () => setDrawMode('erase'));
+$('btn-clear-mine').addEventListener('click', () => socket.emit('clear_my_strokes'));
+
+// ---------------------------------------------------------------------------
 // Rendering
 // ---------------------------------------------------------------------------
 
@@ -221,6 +382,7 @@ function renderLobby() {
     if (!p.connected) li.className = 'offline';
     const dot = document.createElement('span');
     dot.className = 'dot';
+    if (p.color) dot.style.background = p.color; // their doodle color
     const name = document.createElement('span');
     name.textContent = p.name + (p.name === session.name ? ' (you)' : '');
     li.append(dot, name);
@@ -279,6 +441,11 @@ function renderGame() {
   const host = !!(me() && me().isHost);
   $('game-host-controls').hidden = !host || summary.status !== 'playing';
   $('btn-skip').hidden = !!isMyTurn; // can't skip yourself mid-write, just submit
+
+  if (!(isMyTurn || hintPending)) {
+    $('my-color').style.background = myColor();
+    requestAnimationFrame(sizeDoodle); // canvas just became visible — size it
+  }
 }
 
 function renderReveal() {
@@ -299,6 +466,20 @@ function renderReveal() {
   });
 
   $('btn-new-game').hidden = !(me() && me().isHost);
+
+  // The communal masterpiece, if anyone actually doodled.
+  $('reveal-doodle').hidden = canvasStrokes.length === 0;
+  if (canvasStrokes.length) {
+    requestAnimationFrame(() => {
+      const rc = $('reveal-canvas');
+      if (!rc.clientWidth) return;
+      const dpr = window.devicePixelRatio || 1;
+      rc.width = Math.round(rc.clientWidth * dpr);
+      rc.height = Math.round(rc.clientHeight * dpr);
+      const ctx = rc.getContext('2d');
+      for (const s of canvasStrokes) strokePath(ctx, s, rc.width, rc.height);
+    });
+  }
 }
 
 // Highlight one contribution's sentences and show its author + hint in the
@@ -372,6 +553,7 @@ socket.on('connect', () => {
     summary = res.summary;
     if (res.yourTurn) myTurn = res.yourTurn;
     if (res.reveal) revealData = res.reveal;
+    if (res.canvas) { canvasStrokes = res.canvas; pendingStrokes = []; }
     render();
   });
 });
@@ -406,6 +588,7 @@ $('btn-join').addEventListener('click', () => {
     if (!res.ok) return homeError(res.error);
     homeError('');
     saveSession({ code, token: res.token, name: res.name });
+    if (res.canvas) canvasStrokes = res.canvas; // mid-game joiners get the doodle so far
     render(); // room_update may have arrived before this ack, while session was unset
   });
 });
