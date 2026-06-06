@@ -794,7 +794,13 @@ io.on('connection', socket => {
     room.turnIndex = 0;
     room.contributions = [];
     room.title = null;
+    // Shuffle the turn order every game — otherwise the host always opens
+    // and the rotation is just join order.
     room.order = room.players.map(p => p.token);
+    for (let i = room.order.length - 1; i > 0; i--) {
+      const j = crypto.randomInt(i + 1);
+      [room.order[i], room.order[j]] = [room.order[j], room.order[i]];
+    }
     room.orderPos = 0;
     room.canvas = { strokes: [], nextId: 1 };
     io.to(room.code).emit('canvas_state', []);
