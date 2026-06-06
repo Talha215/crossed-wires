@@ -37,7 +37,7 @@ and in a local `game-state.json`, so in-progress games survive restarts.
 ## Install & run
 
 ```bash
-git clone https://github.com/YOURNAME/crossed-wires.git
+git clone https://github.com/Talha215/crossed-wires.git
 cd crossed-wires
 npm install
 npm start
