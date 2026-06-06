@@ -68,7 +68,7 @@ function archiveStory(room) {
     contributions: room.contributions.map(c => ({ name: c.name, text: c.text, hint: c.hint })),
     strokes: publicStrokes(room),
   });
-  fs.writeFileSync(STORIES_FILE, JSON.stringify(archive, null, 2));
+  atomicWrite(STORIES_FILE, JSON.stringify(archive, null, 2));
 }
 
 app.get('/stories', (req, res) =>
@@ -110,13 +110,21 @@ const rooms = new Map();
 
 let saveTimer = null;
 
+// Write-then-rename so a crash mid-write can never corrupt the existing
+// file — the rename is atomic, so we always have either old or new state.
+function atomicWrite(file, data) {
+  const tmp = file + '.tmp';
+  fs.writeFileSync(tmp, data);
+  fs.renameSync(tmp, file);
+}
+
 function save() {
   if (saveTimer) { clearTimeout(saveTimer); saveTimer = null; }
   const plain = [...rooms.values()].map(room => ({
     ...room,
     players: room.players.map(({ socketId, ...p }) => ({ ...p, connected: false })),
   }));
-  fs.writeFileSync(STATE_FILE, JSON.stringify(plain, null, 2));
+  atomicWrite(STATE_FILE, JSON.stringify(plain, null, 2));
 }
 
 // Doodle strokes arrive far more often than game events — batch their writes.
