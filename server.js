@@ -84,6 +84,28 @@ app.get('/api/stories/:id', (req, res) => {
   res.json(story);
 });
 
+// Deleting is host-machine-only. Internet traffic proxied in by Tailscale
+// Funnel / cloudflared also arrives via loopback, but always carries an
+// X-Forwarded-For header — a bare loopback request can only be a browser
+// on the machine running the server.
+function isLocalAdmin(req) {
+  return ['127.0.0.1', '::1', '::ffff:127.0.0.1'].includes(req.socket.remoteAddress)
+    && !req.headers['x-forwarded-for'];
+}
+
+app.delete('/api/stories/:id', (req, res) => {
+  if (!isLocalAdmin(req)) {
+    return res.status(403).json({
+      error: 'Stories can only be deleted from the host machine — open http://localhost:3000/stories on the PC running the server.',
+    });
+  }
+  const before = archive.length;
+  archive = archive.filter(s => s.id !== req.params.id);
+  if (archive.length === before) return res.status(404).json({ error: 'not found' });
+  atomicWrite(STORIES_FILE, JSON.stringify(archive, null, 2));
+  res.json({ ok: true });
+});
+
 // ---------------------------------------------------------------------------
 // State
 // ---------------------------------------------------------------------------
